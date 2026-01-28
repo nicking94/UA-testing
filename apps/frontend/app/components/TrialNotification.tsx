@@ -1,0 +1,1 @@
+"use client";const TrialNotification = () => {  return null;};export default TrialNotification;

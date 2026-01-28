@@ -1,0 +1,1 @@
+import { Module } from '@nestjs/common';import { BusinessDataService } from './business-data.service';import { BusinessDataController } from './business-data.controller';@Module({  providers: [BusinessDataService],  controllers: [BusinessDataController],  exports: [BusinessDataService],})export class BusinessDataModule {}

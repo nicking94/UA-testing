@@ -1,0 +1,982 @@
+"use client";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
+import {
+  Box,
+  Typography,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  IconButton,
+  TextField,
+} from "@mui/material";
+import {
+  Add,
+  Edit,
+  Delete,
+  AttachMoney,
+  Assignment,
+  CheckCircle,
+  Cancel,
+} from "@mui/icons-material";
+import { useRubro } from "@/app/context/RubroContext";
+import { useNotification } from "@/app/hooks/useNotification";
+import { usePriceListsApi } from "@/app/hooks/usePriceListsApi";
+import { productPricesApi } from "@/app/lib/api/product-prices";
+import { productsApi } from "@/app/lib/api/products";
+import { PriceList, Product, ProductPrice, Rubro } from "@/app/lib/types/types";
+import Modal from "@/app/components/Modal";
+import Button from "@/app/components/Button";
+import ProtectedRoute from "@/app/components/ProtectedRoute";
+import { usePagination } from "@/app/context/PaginationContext";
+import SearchBar from "@/app/components/SearchBar";
+import Pagination from "@/app/components/Pagination";
+import Input from "@/app/components/Input";
+import Select from "@/app/components/Select";
+import Notification from "@/app/components/Notification";
+import CustomChip from "@/app/components/CustomChip";
+import CustomGlobalTooltip from "@/app/components/CustomTooltipGlobal";
+import { formatCurrency } from "@/app/lib/utils/currency";
+import getDisplayProductName from "@/app/lib/utils/DisplayProductName";
+const PriceListsManager: React.FC<{
+  rubro: Rubro;
+}> = ({ rubro }) => {
+  const {
+    fetchPriceLists: fetchPriceListsApi,
+    addPriceList,
+    updatePriceList,
+    deletePriceList,
+  } = usePriceListsApi();
+  const [priceLists, setPriceLists] = useState<PriceList[]>([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingPriceList, setEditingPriceList] = useState<PriceList | null>(
+    null
+  );
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [listToDelete, setListToDelete] = useState<PriceList | null>(null);
+  const [isProductsModalOpen, setIsProductsModalOpen] = useState(false); 
+  const [selectedPriceList, setSelectedPriceList] = useState<PriceList | null>(
+    null
+  ); 
+  const [listName, setListName] = useState("");
+  const [isActive, setIsActive] = useState(true);
+  const {
+    isNotificationOpen,
+    notificationMessage,
+    notificationType,
+    showNotification,
+    closeNotification,
+  } = useNotification();
+  const { currentPage, itemsPerPage } = usePagination();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filteredLists, setFilteredLists] = useState<PriceList[]>([]);
+  const showNotificationRef = useRef(showNotification);
+  useEffect(() => {
+    showNotificationRef.current = showNotification;
+  }, [showNotification]);
+  const loadPriceLists = useCallback(async () => {
+    try {
+      const allLists = await fetchPriceListsApi();
+      const lists = allLists.filter((list) => list.rubro === rubro);
+      const uniqueLists = Array.from(
+        new Map(lists.map((list) => [list.name, list])).values()
+      ).sort((a, b) => {
+        if (a.isDefault && !b.isDefault) return -1;
+        if (!a.isDefault && b.isDefault) return 1;
+        return a.name.localeCompare(b.name);
+      });
+      setPriceLists(uniqueLists);
+      setFilteredLists(uniqueLists);
+    } catch (error) {
+      console.error("Error loading price lists:", error);
+      showNotificationRef.current("Error al cargar listas de precios", "error");
+    }
+  }, [rubro, fetchPriceListsApi]);
+  useEffect(() => {
+    loadPriceLists();
+  }, [loadPriceLists]);
+  useEffect(() => {
+    if (searchQuery) {
+      const filtered = priceLists.filter((list) =>
+        list.name.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+      setFilteredLists(filtered);
+    } else {
+      setFilteredLists(priceLists);
+    }
+  }, [searchQuery, priceLists]);
+  const handleOpenModal = (list?: PriceList) => {
+    if (list) {
+      setEditingPriceList(list);
+      setListName(list.name);
+      setIsActive(list.isActive !== false); 
+    } else {
+      setEditingPriceList(null);
+      setListName("");
+      setIsActive(true); 
+    }
+    setIsModalOpen(true);
+  };
+  const handleSave = async () => {
+    if (!listName.trim()) {
+      showNotificationRef.current(
+        "El nombre de la lista es requerido",
+        "error"
+      );
+      return;
+    }
+    const existingList = priceLists.find(
+      (list) =>
+        list.name.toLowerCase() === listName.trim().toLowerCase() &&
+        list.rubro === rubro &&
+        (!editingPriceList || list.id !== editingPriceList.id)
+    );
+    if (existingList) {
+      showNotification(
+        "Ya existe una lista con ese nombre en este rubro",
+        "error"
+      );
+      return;
+    }
+    try {
+      if (editingPriceList) {
+        await updatePriceList(editingPriceList.id, {
+          name: listName.trim(),
+          isActive,
+        });
+        showNotificationRef.current("Lista de precios actualizada", "success");
+      } else {
+        const newPriceList: Omit<PriceList, 'id'> = {
+          name: listName.trim(),
+          rubro,
+          isActive,
+          isDefault: false,
+        };
+        await addPriceList(newPriceList);
+        showNotificationRef.current("Lista de precios creada", "success");
+      }
+      await loadPriceLists();
+      setIsModalOpen(false);
+    } catch (error) {
+      console.error("Error saving price list:", error);
+      showNotificationRef.current("Error al guardar la lista", "error");
+    }
+  };
+  const handleDeleteClick = (list: PriceList) => {
+    setListToDelete(list);
+    setIsDeleteModalOpen(true);
+  };
+  const handleConfirmDelete = useCallback(async () => {
+    if (!listToDelete) return;
+    try {
+      const productPricesData = await productPricesApi.getAll({
+        priceListId: listToDelete.id,
+      });
+      const productPricesCount = Array.isArray(productPricesData)
+        ? productPricesData.length
+        : 0;
+      if (productPricesCount > 0) {
+        showNotificationRef.current(
+          "No se puede eliminar porque hay productos usando esta lista",
+          "error"
+        );
+        return;
+      }
+      await deletePriceList(listToDelete.id);
+      showNotificationRef.current("Lista eliminada", "success");
+      await loadPriceLists();
+    } catch (error) {
+      console.error("Error deleting price list:", error);
+      showNotificationRef.current("Error al eliminar la lista", "error");
+    } finally {
+      setIsDeleteModalOpen(false);
+      setListToDelete(null);
+    }
+  }, [listToDelete, deletePriceList, loadPriceLists]);
+  const handleViewProducts = (list: PriceList) => {
+    setSelectedPriceList(list);
+    setIsProductsModalOpen(true);
+  };
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentLists = filteredLists.slice(indexOfFirstItem, indexOfLastItem);
+  const getTableHeaderStyle = () => ({
+    bgcolor: "primary.main",
+    color: "primary.contrastText",
+  });
+  const statusOptions = [
+    { value: "active", label: "Activa" },
+    { value: "inactive", label: "Inactiva" },
+  ];
+  const DeleteModalContent = useMemo(
+    () => (
+      <Modal
+        isOpen={isDeleteModalOpen}
+        onClose={() => setIsDeleteModalOpen(false)}
+        title="Eliminar Lista de Precios"
+        bgColor="bg-white dark:bg-gray_b"
+        buttons={
+          <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 2 }}>
+            <Button
+              variant="text"
+              onClick={() => setIsDeleteModalOpen(false)}
+              sx={{
+                color: "text.secondary",
+                borderColor: "text.secondary",
+                "&:hover": {
+                  backgroundColor: "action.hover",
+                  borderColor: "text.primary",
+                },
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="contained"
+              color="error"
+              onClick={handleConfirmDelete}
+              isPrimaryAction={true}
+              sx={{
+                bgcolor: "error.main",
+                "&:hover": { bgcolor: "error.dark" },
+              }}
+            >
+              Sí, Eliminar
+            </Button>
+          </Box>
+        }
+      >
+        <Box sx={{ textAlign: "center", py: 2 }}>
+          <Delete
+            sx={{ fontSize: 48, color: "error.main", mb: 2, mx: "auto" }}
+          />
+          <Typography variant="h6" fontWeight="semibold" sx={{ mb: 1 }}>
+            ¿Está seguro/a que desea eliminar esta lista?
+          </Typography>
+          <Typography variant="body2" fontWeight="semibold" sx={{ mb: 1 }}>
+            <strong>{listToDelete?.name}</strong> será eliminada
+            permanentemente.
+          </Typography>
+        </Box>
+      </Modal>
+    ),
+    [isDeleteModalOpen, listToDelete, handleConfirmDelete]
+  );
+  return (
+    <>
+      <Box
+        sx={{
+          display: "flex",
+          flexDirection: "column",
+          flex: 1,
+          justifyContent: "space-between",
+        }}
+      >
+        {}
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            mb: 2,
+            width: "100%",
+          }}
+        >
+          <Box sx={{ width: "100%", maxWidth: "400px" }}>
+            <SearchBar onSearch={setSearchQuery} />
+          </Box>
+          <Box
+            sx={{ display: "flex", justifyContent: "flex-end", width: "100%" }}
+          >
+            <Button
+              variant="contained"
+              startIcon={<Add />}
+              onClick={() => handleOpenModal()}
+              sx={{
+                bgcolor: "primary.main",
+                "&:hover": { bgcolor: "primary.dark" },
+              }}
+            >
+              Nueva Lista
+            </Button>
+          </Box>
+        </Box>
+        {}
+        <Box sx={{ flex: 1, minHeight: "auto" }}>
+          <TableContainer
+            component={Paper}
+            sx={{ maxHeight: "55vh", mb: 2, flex: 1 }}
+          >
+            <Table stickyHeader>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={getTableHeaderStyle()}>Nombre</TableCell>
+                  <TableCell sx={getTableHeaderStyle()} align="center">
+                    Estado
+                  </TableCell>
+                  <TableCell sx={getTableHeaderStyle()} align="center">
+                    Fecha de Creación
+                  </TableCell>
+                  <TableCell sx={getTableHeaderStyle()} align="center">
+                    Acciones
+                  </TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {currentLists.length > 0 ? (
+                  currentLists.map((list) => (
+                    <TableRow
+                      key={list.id}
+                      sx={{
+                        border: "1px solid",
+                        borderColor: "divider",
+                        "&:hover": {
+                          backgroundColor: "action.hover",
+                          transform: "translateY(-1px)",
+                          boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                        },
+                        transition: "all 0.3s ease-in-out",
+                      }}
+                    >
+                      <TableCell>
+                        <Typography fontWeight="medium">{list.name}</Typography>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Box
+                          sx={{
+                            display: "flex",
+                            justifyContent: "center",
+                            alignItems: "center",
+                            gap: 1,
+                          }}
+                        >
+                          <CustomChip
+                            label={
+                              list.isActive !== false ? "Activa" : "Inactiva"
+                            }
+                            color={
+                              list.isActive !== false ? "success" : "error"
+                            }
+                            size="small"
+                            icon={
+                              list.isActive !== false ? (
+                                <CheckCircle />
+                              ) : (
+                                <Cancel />
+                              )
+                            }
+                          />
+                        </Box>
+                      </TableCell>
+                      <TableCell align="center">
+                        {list.createdAt
+                          ? new Date(list.createdAt).toLocaleDateString("es-AR")
+                          : "Sin fecha"}
+                      </TableCell>
+                      <TableCell align="center">
+                        <Box
+                          sx={{
+                            display: "flex",
+                            justifyContent: "center",
+                            gap: 1,
+                          }}
+                        >
+                          <CustomGlobalTooltip title="Ver/Modificar precios">
+                            <IconButton
+                              size="small"
+                              onClick={() => handleViewProducts(list)}
+                              sx={{
+                                borderRadius: "4px",
+                                color: "text.secondary",
+                                "&:hover": {
+                                  backgroundColor: "info.main",
+                                  color: "white",
+                                },
+                              }}
+                            >
+                              <AttachMoney fontSize="small" />
+                            </IconButton>
+                          </CustomGlobalTooltip>
+                          <CustomGlobalTooltip title="Editar lista">
+                            <IconButton
+                              size="small"
+                              onClick={() => handleOpenModal(list)}
+                              sx={{
+                                borderRadius: "4px",
+                                color: "text.secondary",
+                                "&:hover": {
+                                  backgroundColor: "primary.main",
+                                  color: "white",
+                                },
+                              }}
+                            >
+                              <Edit fontSize="small" />
+                            </IconButton>
+                          </CustomGlobalTooltip>
+                          <CustomGlobalTooltip title="Eliminar lista">
+                            <IconButton
+                              size="small"
+                              onClick={() => handleDeleteClick(list)}
+                              sx={{
+                                borderRadius: "4px",
+                                color: "text.secondary",
+                                "&:hover": {
+                                  backgroundColor: "error.main",
+                                  color: "white",
+                                },
+                              }}
+                            >
+                              <Delete fontSize="small" />
+                            </IconButton>
+                          </CustomGlobalTooltip>
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={4} sx={{ py: 4, textAlign: "center" }}>
+                      <Box
+                        sx={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          color: "text.disabled",
+                        }}
+                      >
+                        <AttachMoney
+                          sx={{ fontSize: 64, color: "grey.400", mb: 2 }}
+                        />
+                        <Typography>
+                          {searchQuery
+                            ? "No se encontraron listas de precios."
+                            : "No hay listas de precios registradas."}
+                        </Typography>
+                      </Box>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Box>
+        {}
+        {filteredLists.length > 0 && (
+          <Pagination
+            text="Listas por página"
+            text2="Total de listas"
+            totalItems={filteredLists.length}
+          />
+        )}
+        {}
+        <Modal
+          isOpen={isModalOpen}
+          onClose={() => setIsModalOpen(false)}
+          title={editingPriceList ? "Editar Lista" : "Nueva Lista de Precios"}
+          bgColor="bg-white dark:bg-gray_b"
+          buttons={
+            <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 2 }}>
+              <Button
+                variant="text"
+                onClick={() => setIsModalOpen(false)}
+                sx={{
+                  color: "text.secondary",
+                  borderColor: "text.secondary",
+                  "&:hover": {
+                    backgroundColor: "action.hover",
+                    borderColor: "text.primary",
+                  },
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button
+                variant="contained"
+                onClick={handleSave}
+                isPrimaryAction={true}
+                sx={{
+                  bgcolor: "primary.main",
+                  "&:hover": { bgcolor: "primary.dark" },
+                }}
+              >
+                {editingPriceList ? "Actualizar" : "Crear"}
+              </Button>
+            </Box>
+          }
+        >
+          <Box sx={{ display: "flex", flexDirection: "row", gap: 2 }}>
+            <Input
+              label="Nombre de la lista"
+              value={listName}
+              onChange={(value) => setListName(value.toString())}
+              placeholder="Ej: Mayorista, Minorista, Oferta"
+              required
+            />
+            <Select
+              label="Estado"
+              value={isActive ? "active" : "inactive"}
+              options={statusOptions}
+              onChange={(value) => setIsActive(value === "active")}
+              size="small"
+            />
+            {!isActive && (
+              <Typography variant="caption" color="warning.main">
+                ⚠️ Una lista inactiva no estará disponible para seleccionar en
+                las ventas.
+              </Typography>
+            )}
+          </Box>
+        </Modal>
+        {}
+        {selectedPriceList && (
+          <PriceListProductsModal
+            isOpen={isProductsModalOpen}
+            onClose={() => setIsProductsModalOpen(false)}
+            rubro={rubro}
+            priceList={selectedPriceList}
+          />
+        )}
+        {DeleteModalContent}
+        <Notification
+          isOpen={isNotificationOpen}
+          message={notificationMessage}
+          type={notificationType}
+          onClose={closeNotification}
+        />
+      </Box>
+    </>
+  );
+};
+const PriceListProductsModal: React.FC<{
+  isOpen: boolean;
+  onClose: () => void;
+  rubro: Rubro;
+  priceList: PriceList;
+}> = ({ isOpen, onClose, rubro, priceList }) => {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
+  const [priceUpdates, setPriceUpdates] = useState<Record<number, number>>({});
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSaving, setIsSaving] = useState(false); 
+  const {
+    isNotificationOpen,
+    notificationMessage,
+    notificationType,
+    showNotification,
+    closeNotification,
+  } = useNotification();
+  const { currentPage, itemsPerPage } = usePagination();
+  const showNotificationRef = useRef(showNotification);
+  useEffect(() => {
+    showNotificationRef.current = showNotification;
+  }, [showNotification]);
+  const loadData = useCallback(async () => {
+    try {
+      const prods = await productsApi.getAll({ rubro });
+      setProducts(prods);
+      setFilteredProducts(prods);
+      if (priceList.id) {
+        const pricesData = await productPricesApi.getAll({ priceListId: priceList.id });
+        const prices = Array.isArray(pricesData) ? pricesData : [];
+        const updates: Record<number, number> = {};
+        prices.forEach((price: ProductPrice) => {
+          updates[price.productId] = price.price;
+        });
+        setPriceUpdates(updates);
+      }
+    } catch (error) {
+      console.error("Error loading data:", error);
+      showNotificationRef.current("Error al cargar datos", "error");
+    }
+  }, [rubro, priceList]);
+  useEffect(() => {
+    if (isOpen) {
+      loadData();
+    }
+  }, [isOpen, loadData]);
+  useEffect(() => {
+    if (searchQuery) {
+      const filtered = products.filter((product) =>
+        getDisplayProductName(product, rubro, false)
+          .toLowerCase()
+          .includes(searchQuery.toLowerCase())
+      );
+      setFilteredProducts(filtered);
+    } else {
+      setFilteredProducts(products);
+    }
+  }, [searchQuery, products, rubro]);
+  const handlePriceChange = (productId: number, price: number) => {
+    setPriceUpdates((prev) => ({
+      ...prev,
+      [productId]: price,
+    }));
+  };
+  const saveAllPrices = async () => {
+    setIsSaving(true);
+    try {
+      let hasChanges = false;
+      for (const [productId, price] of Object.entries(priceUpdates)) {
+        const originalPrice =
+          products.find((p) => p.id === parseInt(productId))?.price || 0;
+        if (price !== originalPrice) {
+          try {
+            await productPricesApi.update(parseInt(productId), priceList.id, { price });
+          } catch {
+            await productPricesApi.create({
+              productId: parseInt(productId),
+              priceListId: priceList.id,
+              price,
+            });
+          }
+          hasChanges = true;
+        }
+      }
+      if (hasChanges) {
+        showNotificationRef.current(
+          "Todos los precios han sido guardados",
+          "success"
+        );
+        setTimeout(() => {
+          onClose();
+        }, 1500);
+      } else {
+        showNotificationRef.current("No hay cambios para guardar", "info");
+      }
+    } catch (error) {
+      console.error("Error saving all prices:", error);
+      showNotificationRef.current("Error al guardar los precios", "error");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+  const savePriceAndCloseIfSingle = async (productId: number) => {
+    if (!priceList.id || priceUpdates[productId] === undefined) return;
+    try {
+      try {
+        await productPricesApi.update(productId, priceList.id, { price: priceUpdates[productId] });
+      } catch {
+        await productPricesApi.create({
+          productId,
+          priceListId: priceList.id,
+          price: priceUpdates[productId],
+        });
+      }
+      showNotificationRef.current(
+        "Precio actualizado correctamente",
+        "success"
+      );
+      const modifiedPricesCount = Object.keys(priceUpdates).length;
+      const originalPrice =
+        products.find((p) => p.id === productId)?.price || 0;
+      const currentPrice = priceUpdates[productId];
+      if (modifiedPricesCount === 1 && currentPrice !== originalPrice) {
+        setTimeout(() => {
+          onClose();
+        }, 1500);
+      }
+    } catch (error) {
+      console.error("Error saving price:", error);
+      showNotificationRef.current("Error al guardar el precio", "error");
+    }
+  };
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentProducts = filteredProducts.slice(
+    indexOfFirstItem,
+    indexOfLastItem
+  );
+  const getTableHeaderStyle = () => ({
+    bgcolor: "primary.main",
+    color: "primary.contrastText",
+  });
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={`Precios - ${priceList.name}`}
+      bgColor="bg-white dark:bg-gray_b"
+      buttons={
+        <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 2 }}>
+          <Button
+            variant="text"
+            onClick={onClose}
+            disabled={isSaving}
+            sx={{
+              color: "text.secondary",
+              "&:hover": {
+                backgroundColor: "action.hover",
+              },
+            }}
+          >
+            Cerrar
+          </Button>
+          <Box sx={{ display: "flex", gap: 1 }}>
+            <Button
+              variant="contained"
+              startIcon={<CheckCircle />}
+              onClick={saveAllPrices}
+              disabled={isSaving}
+              sx={{
+                bgcolor: "primary.main",
+                "&:hover": { bgcolor: "primary.dark" },
+                "&.Mui-disabled": {
+                  bgcolor: "action.disabledBackground",
+                  color: "action.disabled",
+                },
+              }}
+            >
+              {isSaving ? "Guardando..." : "Guardar Todos"}
+            </Button>
+          </Box>
+        </Box>
+      }
+    >
+      <Box
+        sx={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 2,
+          maxHeight: "70vh",
+        }}
+      >
+        {}
+        <Box sx={{ width: "100%" }}>
+          <SearchBar onSearch={setSearchQuery} />
+        </Box>
+        {}
+        <TableContainer component={Paper} sx={{ maxHeight: "50vh", flex: 1 }}>
+          <Table stickyHeader size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell sx={getTableHeaderStyle()}>Producto</TableCell>
+                <TableCell sx={getTableHeaderStyle()} align="center">
+                  Precio Base
+                </TableCell>
+                <TableCell sx={getTableHeaderStyle()} align="center">
+                  Precio en Lista
+                </TableCell>
+                <TableCell sx={getTableHeaderStyle()} align="center">
+                  Diferencia
+                </TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {currentProducts.length > 0 ? (
+                currentProducts.map((product) => {
+                  const listPrice = priceUpdates[product.id] || product.price;
+                  const difference = listPrice - product.price;
+                  return (
+                    <TableRow
+                      key={product.id}
+                      sx={{
+                        "&:hover": {
+                          backgroundColor: "action.hover",
+                        },
+                      }}
+                    >
+                      <TableCell>
+                        <Typography variant="body2" fontWeight="medium">
+                          {getDisplayProductName(product, rubro)}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Typography variant="body2" color="text.secondary">
+                          {formatCurrency(product.price)}
+                        </Typography>
+                      </TableCell>
+                      <TableCell align="center">
+                        <TextField
+                          type="number"
+                          value={listPrice}
+                          onChange={(e) =>
+                            handlePriceChange(
+                              product.id,
+                              parseFloat(e.target.value)
+                            )
+                          }
+                          onBlur={() => savePriceAndCloseIfSingle(product.id)}
+                          size="small"
+                          sx={{ width: 120 }}
+                          InputProps={{
+                            startAdornment: (
+                              <Typography sx={{ mr: 1 }}>$</Typography>
+                            ),
+                          }}
+                          disabled={isSaving}
+                        />
+                      </TableCell>
+                      <TableCell align="center">
+                        <Typography
+                          variant="body2"
+                          color={
+                            difference > 0
+                              ? "success.main"
+                              : difference < 0
+                              ? "error.main"
+                              : "text.secondary"
+                          }
+                          fontWeight={difference !== 0 ? "bold" : "normal"}
+                        >
+                          {formatCurrency(difference)}
+                          {difference !== 0 && (
+                            <Typography
+                              component="span"
+                              variant="caption"
+                              sx={{ ml: 1 }}
+                            >
+                              ({difference > 0 ? "+" : ""}
+                              {((difference / product.price) * 100).toFixed(1)}
+                              %)
+                            </Typography>
+                          )}
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={4} sx={{ py: 4, textAlign: "center" }}>
+                    <Box
+                      sx={{
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        color: "text.disabled",
+                      }}
+                    >
+                      <Assignment
+                        sx={{
+                          fontSize: 48,
+                          color: "grey.400",
+                          mb: 2,
+                        }}
+                      />
+                      <Typography>
+                        {searchQuery
+                          ? "No se encontraron productos."
+                          : "No hay productos en este rubro."}
+                      </Typography>
+                    </Box>
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        {}
+        {filteredProducts.length > 0 && (
+          <Pagination
+            text="Productos por página"
+            text2="Total de productos"
+            totalItems={filteredProducts.length}
+          />
+        )}
+      </Box>
+      <Notification
+        isOpen={isNotificationOpen}
+        message={notificationMessage}
+        type={notificationType}
+        onClose={closeNotification}
+      />
+    </Modal>
+  );
+};
+const ListasPreciosPage = () => {
+  const { rubro } = useRubro();
+  const {
+    isNotificationOpen,
+    notificationMessage,
+    notificationType,
+    closeNotification,
+  } = useNotification();
+  if (rubro === "Todos los rubros") {
+    return (
+      <ProtectedRoute>
+        <Box
+          sx={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            minHeight: "calc(100vh - 64px)",
+            p: 3,
+            textAlign: "center",
+            bgcolor: "background.default",
+          }}
+        >
+          <Box
+            sx={{
+              width: 80,
+              height: 80,
+              borderRadius: "50%",
+              bgcolor: "primary.light",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              mb: 3,
+              color: "primary.main",
+            }}
+          >
+            <AttachMoney sx={{ fontSize: 40 }} />
+          </Box>
+          <Typography
+            variant="h5"
+            fontWeight="medium"
+            color="text.secondary"
+            gutterBottom
+          >
+            Selecciona un rubro específico
+          </Typography>
+          <Typography variant="body1" color="text.secondary">
+            Para gestionar listas de precios, primero selecciona un rubro desde
+            el menú lateral
+          </Typography>
+        </Box>
+      </ProtectedRoute>
+    );
+  }
+  return (
+    <ProtectedRoute>
+      <Box
+        sx={{
+          p: 4,
+          height: "calc(100vh - 64px)",
+          display: "flex",
+          flexDirection: "column",
+          bgcolor: "background.default",
+        }}
+      >
+        {}
+        <Box sx={{ mb: 3 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2 }}>
+            <Typography variant="h5" fontWeight="semibold">
+              Listas de Precios
+            </Typography>
+          </Box>
+        </Box>
+        {}
+        <Box sx={{ flex: 1, display: "flex", flexDirection: "column" }}>
+          <PriceListsManager rubro={rubro} />
+        </Box>
+        <Notification
+          isOpen={isNotificationOpen}
+          message={notificationMessage}
+          type={notificationType}
+          onClose={closeNotification}
+        />
+      </Box>
+    </ProtectedRoute>
+  );
+};
+export default ListasPreciosPage;
