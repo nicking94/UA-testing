@@ -1,1 +1,38 @@
-import {  Controller,  Get,  Post,  Put,  Body,  Param,  Query,  UseGuards,} from '@nestjs/common';import { UserPreferencesService } from './user-preferences.service';import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';@Controller('user-preferences')@UseGuards(JwtAuthGuard)export class UserPreferencesController {  constructor(private userPreferencesService: UserPreferencesService) {}  @Get()  findOne(@Query('userId') userId?: string) {    return this.userPreferencesService.findOne(userId ? +userId : undefined);  }  @Post()  create(@Body() data: any) {    return this.userPreferencesService.create(data);  }  @Put(':id')  update(@Param('id') id: string, @Body() data: any) {    return this.userPreferencesService.update(+id, data);  }  @Put('upsert')  upsert(@Body() data: any) {    return this.userPreferencesService.upsert(data);  }}
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { UserPreferencesService } from './user-preferences.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+
+@Controller('user-preferences')
+@UseGuards(JwtAuthGuard)
+export class UserPreferencesController {
+  constructor(private userPreferencesService: UserPreferencesService) {}
+
+  @Get()
+  findOne(@Query('userId') userId?: string) {
+    return this.userPreferencesService.findOne(userId ? +userId : undefined);
+  }
+
+  @Post()
+  create(@Body() data: any) {
+    return this.userPreferencesService.create(data);
+  }
+
+  @Put('upsert')
+  upsert(@Body() data: any) {
+    return this.userPreferencesService.upsert(data);
+  }
+
+  @Put(':id')
+  update(@Param('id') id: string, @Body() data: any) {
+    return this.userPreferencesService.update(+id, data);
+  }
+}

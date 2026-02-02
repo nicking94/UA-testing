@@ -14,6 +14,9 @@ export class UserPreferencesService {
     return this.prisma.userPreferences.create({ data });
   }
   async update(id: number, data: any) {
+    if (isNaN(id)) {
+      throw new Error('Invalid ID provided for update');
+    }
     return this.prisma.userPreferences.update({ where: { id }, data });
   }
   async upsert(data: any) {
@@ -24,7 +27,10 @@ export class UserPreferencesService {
     });
 
     // Clean data to avoid sending id, createdAt, updatedAt if they exist in rest
-    const { id, createdAt, updatedAt, ...cleanData } = rest;
+    const cleanData = { ...rest };
+    delete (cleanData as any).id;
+    delete (cleanData as any).createdAt;
+    delete (cleanData as any).updatedAt;
 
     if (existing) {
       return this.prisma.userPreferences.update({

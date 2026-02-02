@@ -1,1 +1,241 @@
-import { Injectable } from '@nestjs/common';import { PrismaService } from '../prisma/prisma.service';@Injectable()export class SalesService {  constructor(private prisma: PrismaService) {}  async findAll(filters?: {    dateFrom?: string;    dateTo?: string;    customerId?: string;    credit?: boolean;    priceListId?: number;  }) {    const where: any = {};    if (filters?.dateFrom || filters?.dateTo) {      where.date = {};      if (filters.dateFrom) {        where.date.gte = new Date(filters.dateFrom);      }      if (filters.dateTo) {        where.date.lte = new Date(filters.dateTo);      }    }    if (filters?.customerId) {      where.customerId = filters.customerId;    }    if (filters?.credit !== undefined) {      where.credit = filters.credit;    }    return this.prisma.sale.findMany({      where,      include: {        customer: true,        items: {          include: {            product: true,          },        },        payments: true,        installments: true,      },      orderBy: { date: 'desc' },    });  }  async findOne(id: number) {    return this.prisma.sale.findUnique({      where: { id },      include: {        customer: true,        items: {          include: {            product: true,          },        },        payments: true,        installments: {          orderBy: { number: 'asc' },        },        editHistory: {          orderBy: { date: 'desc' },        },      },    });  }  async create(data: any) {    const { items, payments, installments, editHistory, ...saleData } = data;    return this.prisma.sale.create({      data: {        ...saleData,        items: {          create: items.map((item: any) => ({            productId: item.productId,            productName: item.productName,            quantity: item.quantity,            unit: item.unit,            price: item.price,            size: item.size,            color: item.color,            discount: item.discount || 0,            surcharge: item.surcharge || 0,            basePrice: item.basePrice,            notes: item.notes,            description: item.description,            rubro: item.rubro,            fromBudget: item.fromBudget,            budgetId: item.budgetId,            costPrice: item.costPrice,            profit: item.profit,            profitPercentage: item.profitPercentage,          })),        },        payments: payments          ? {              create: payments.map((payment: any) => ({                amount: payment.amount,                date: payment.date ? new Date(payment.date) : new Date(),                method: payment.method,                checkNumber: payment.checkNumber,                checkDate: payment.checkDate,                checkBank: payment.checkBank,                checkStatus: payment.checkStatus,                checkDescription: payment.checkDescription,                customerId: payment.customerId,                customerName: payment.customerName,                installmentNumber: payment.installmentNumber,                saleTotal: payment.saleTotal,              })),            }          : undefined,        installments: installments          ? {              create: installments.map((inst: any) => ({                number: inst.number,                dueDate: new Date(inst.dueDate),                amount: inst.amount,                interestAmount: inst.interestAmount || 0,                penaltyAmount: inst.penaltyAmount || 0,                status: inst.status || 'pendiente',                totalAmount: inst.totalAmount,              })),            }          : undefined,      },      include: {        customer: true,        items: {          include: {            product: true,          },        },        payments: true,        installments: true,      },    });  }  async update(id: number, data: any) {    const { items, payments, installments, editHistory, ...saleData } = data;    if (editHistory) {      const currentSale = await this.prisma.sale.findUnique({        where: { id },        select: { total: true },      });      if (currentSale) {        await this.prisma.saleEditHistory.create({          data: {            saleId: id,            changes: editHistory.changes,            previousTotal: currentSale.total,            newTotal: data.total,          },        });      }    }    await Promise.all([      this.prisma.saleItem.deleteMany({ where: { saleId: id } }),      this.prisma.payment.deleteMany({ where: { saleId: id } }),      this.prisma.installment.deleteMany({ where: { creditSaleId: id } }),    ]);    return this.prisma.sale.update({      where: { id },      data: {        ...saleData,        edited: true,        items: {          create: items.map((item: any) => ({            productId: item.productId,            productName: item.productName,            quantity: item.quantity,            unit: item.unit,            price: item.price,            size: item.size,            color: item.color,            discount: item.discount || 0,            surcharge: item.surcharge || 0,            basePrice: item.basePrice,            notes: item.notes,            description: item.description,            rubro: item.rubro,            fromBudget: item.fromBudget,            budgetId: item.budgetId,            costPrice: item.costPrice,            profit: item.profit,            profitPercentage: item.profitPercentage,          })),        },        payments: payments          ? {              create: payments.map((payment: any) => ({                amount: payment.amount,                date: payment.date ? new Date(payment.date) : new Date(),                method: payment.method,                checkNumber: payment.checkNumber,                checkDate: payment.checkDate,                checkBank: payment.checkBank,                checkStatus: payment.checkStatus,                checkDescription: payment.checkDescription,                customerId: payment.customerId,                customerName: payment.customerName,                installmentNumber: payment.installmentNumber,                saleTotal: payment.saleTotal,              })),            }          : undefined,        installments: installments          ? {              create: installments.map((inst: any) => ({                number: inst.number,                dueDate: new Date(inst.dueDate),                amount: inst.amount,                interestAmount: inst.interestAmount || 0,                penaltyAmount: inst.penaltyAmount || 0,                status: inst.status || 'pendiente',                totalAmount: inst.totalAmount,              })),            }          : undefined,      },      include: {        customer: true,        items: {          include: {            product: true,          },        },        payments: true,        installments: true,      },    });  }  async delete(id: number) {    return this.prisma.sale.delete({      where: { id },    });  }}
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+
+@Injectable()
+export class SalesService {
+  constructor(private prisma: PrismaService) {}
+
+  async findAll(filters?: {
+    dateFrom?: string;
+    dateTo?: string;
+    customerId?: string;
+    credit?: boolean;
+    priceListId?: number;
+  }) {
+    const where: any = {};
+    if (filters?.dateFrom || filters?.dateTo) {
+      where.date = {};
+      if (filters.dateFrom) {
+        where.date.gte = new Date(filters.dateFrom);
+      }
+      if (filters.dateTo) {
+        where.date.lte = new Date(filters.dateTo);
+      }
+    }
+    if (filters?.customerId) {
+      where.customerId = filters.customerId;
+    }
+    if (filters?.credit !== undefined) {
+      where.credit = filters.credit;
+    }
+    return this.prisma.sale.findMany({
+      where,
+      include: {
+        customer: true,
+        items: {
+          include: {
+            product: true,
+          },
+        },
+        payments: true,
+        installments: true,
+      },
+      orderBy: { date: 'desc' },
+    });
+  }
+
+  async findOne(id: number) {
+    return this.prisma.sale.findUnique({
+      where: { id },
+      include: {
+        customer: true,
+        items: {
+          include: {
+            product: true,
+          },
+        },
+        payments: true,
+        installments: {
+          orderBy: { number: 'asc' },
+        },
+        editHistory: {
+          orderBy: { date: 'desc' },
+        },
+      },
+    });
+  }
+
+  async create(data: any) {
+    const { items, payments, installments, ...saleData } = data;
+    // editHistory is intentionally ignored if present in data during creation
+    return this.prisma.sale.create({
+      data: {
+        ...saleData,
+        items: {
+          create: items.map((item: any) => ({
+            productId: item.productId,
+            productName: item.productName,
+            quantity: item.quantity,
+            unit: item.unit,
+            price: item.price,
+            size: item.size,
+            color: item.color,
+            discount: item.discount || 0,
+            surcharge: item.surcharge || 0,
+            basePrice: item.basePrice,
+            notes: item.notes,
+            description: item.description,
+            rubro: item.rubro,
+            fromBudget: item.fromBudget,
+            budgetId: item.budgetId,
+            costPrice: item.costPrice,
+            profit: item.profit,
+            profitPercentage: item.profitPercentage,
+          })),
+        },
+        payments: payments
+          ? {
+              create: payments.map((payment: any) => ({
+                amount: payment.amount,
+                date: payment.date ? new Date(payment.date) : new Date(),
+                method: payment.method,
+                checkNumber: payment.checkNumber,
+                checkDate: payment.checkDate,
+                checkBank: payment.checkBank,
+                checkStatus: payment.checkStatus,
+                checkDescription: payment.checkDescription,
+                customerId: payment.customerId,
+                customerName: payment.customerName,
+                installmentNumber: payment.installmentNumber,
+                saleTotal: payment.saleTotal,
+              })),
+            }
+          : undefined,
+        installments: installments
+          ? {
+              create: installments.map((inst: any) => ({
+                number: inst.number,
+                dueDate: new Date(inst.dueDate),
+                amount: inst.amount,
+                interestAmount: inst.interestAmount || 0,
+                penaltyAmount: inst.penaltyAmount || 0,
+                status: inst.status || 'pendiente',
+                totalAmount: inst.totalAmount,
+              })),
+            }
+          : undefined,
+      },
+      include: {
+        customer: true,
+        items: {
+          include: {
+            product: true,
+          },
+        },
+        payments: true,
+        installments: true,
+      },
+    });
+  }
+
+  async update(id: number, data: any) {
+    const { items, payments, installments, editHistory, ...saleData } = data;
+    if (editHistory) {
+      const currentSale = await this.prisma.sale.findUnique({
+        where: { id },
+        select: { total: true },
+      });
+      if (currentSale) {
+        await this.prisma.saleEditHistory.create({
+          data: {
+            saleId: id,
+            changes: editHistory.changes,
+            previousTotal: currentSale.total,
+            newTotal: data.total,
+          },
+        });
+      }
+    }
+    await Promise.all([
+      this.prisma.saleItem.deleteMany({ where: { saleId: id } }),
+      this.prisma.payment.deleteMany({ where: { saleId: id } }),
+      this.prisma.installment.deleteMany({ where: { creditSaleId: id } }),
+    ]);
+    return this.prisma.sale.update({
+      where: { id },
+      data: {
+        ...saleData,
+        edited: true,
+        items: {
+          create: items.map((item: any) => ({
+            productId: item.productId,
+            productName: item.productName,
+            quantity: item.quantity,
+            unit: item.unit,
+            price: item.price,
+            size: item.size,
+            color: item.color,
+            discount: item.discount || 0,
+            surcharge: item.surcharge || 0,
+            basePrice: item.basePrice,
+            notes: item.notes,
+            description: item.description,
+            rubro: item.rubro,
+            fromBudget: item.fromBudget,
+            budgetId: item.budgetId,
+            costPrice: item.costPrice,
+            profit: item.profit,
+            profitPercentage: item.profitPercentage,
+          })),
+        },
+        payments: payments
+          ? {
+              create: payments.map((payment: any) => ({
+                amount: payment.amount,
+                date: payment.date ? new Date(payment.date) : new Date(),
+                method: payment.method,
+                checkNumber: payment.checkNumber,
+                checkDate: payment.checkDate,
+                checkBank: payment.checkBank,
+                checkStatus: payment.checkStatus,
+                checkDescription: payment.checkDescription,
+                customerId: payment.customerId,
+                customerName: payment.customerName,
+                installmentNumber: payment.installmentNumber,
+                saleTotal: payment.saleTotal,
+              })),
+            }
+          : undefined,
+        installments: installments
+          ? {
+              create: installments.map((inst: any) => ({
+                number: inst.number,
+                dueDate: new Date(inst.dueDate),
+                amount: inst.amount,
+                interestAmount: inst.interestAmount || 0,
+                penaltyAmount: inst.penaltyAmount || 0,
+                status: inst.status || 'pendiente',
+                totalAmount: inst.totalAmount,
+              })),
+            }
+          : undefined,
+      },
+      include: {
+        customer: true,
+        items: {
+          include: {
+            product: true,
+          },
+        },
+        payments: true,
+        installments: true,
+      },
+    });
+  }
+
+  async delete(id: number) {
+    return this.prisma.sale.delete({
+      where: { id },
+    });
+  }
+}
