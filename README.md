@@ -9,8 +9,6 @@ Sistema de gestión reestructurado como monorepo con backend NestJS y PostgreSQL
 ├── apps/
 │   ├── frontend/          # Next.js Frontend
 │   └── backend/           # NestJS Backend
-├── packages/
-│   └── shared/            # Código compartido (futuro)
 └── package.json           # Configuración del monorepo
 ```
 

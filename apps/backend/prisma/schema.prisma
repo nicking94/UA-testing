@@ -120,6 +120,8 @@ model User {
 
   preferences UserPreferences?
   auth        Auth?
+
+  @@map("users")
 }
 
 model Auth {
@@ -127,11 +129,15 @@ model Auth {
   isAuthenticated Boolean @default(false)
   userId         Int? @unique
   user           User? @relation(fields: [userId], references: [id])
+
+  @@map("auth")
 }
 
 model Theme {
   id    Int    @id @default(autoincrement())
   value String
+
+  @@map("themes")
 }
 
 model Product {
@@ -171,6 +177,8 @@ model Product {
   productReturns    ProductReturn[]
   supplierProducts  SupplierProduct[]
   customCategories  ProductCustomCategory[]
+
+  @@map("products")
 }
 
 model ProductCustomCategory {
@@ -181,6 +189,7 @@ model ProductCustomCategory {
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@unique([productId, name, rubro])
+  @@map("product_custom_categories")
 }
 
 model PriceList {
@@ -193,6 +202,8 @@ model PriceList {
   updatedAt DateTime @updatedAt
 
   productPrices ProductPrice[]
+
+  @@map("price_lists")
 }
 
 model ProductPrice {
@@ -208,6 +219,7 @@ model ProductPrice {
   @@unique([productId, priceListId])
   @@index([productId])
   @@index([priceListId])
+  @@map("product_prices")
 }
 
 model Customer {
@@ -229,6 +241,8 @@ model Customer {
   payments       Payment[]
   budgets        Budget[]
   customerNotes  Note[]       @relation("CustomerNotes")
+
+  @@map("customers")
 }
 
 model Supplier {
@@ -242,6 +256,8 @@ model Supplier {
   updatedAt   DateTime @updatedAt
 
   supplierProducts SupplierProduct[]
+
+  @@map("suppliers")
 }
 
 model SupplierProduct {
@@ -252,6 +268,7 @@ model SupplierProduct {
   product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@unique([supplierId, productId])
+  @@map("supplier_products")
 }
 
 model Sale {
@@ -287,6 +304,7 @@ model Sale {
   @@index([date])
   @@index([customerId])
   @@index([credit])
+  @@map("sales")
 }
 
 model SaleItem {
@@ -316,6 +334,7 @@ model SaleItem {
 
   @@index([saleId])
   @@index([productId])
+  @@map("sale_items")
 }
 
 model SaleEditHistory {
@@ -328,6 +347,7 @@ model SaleEditHistory {
   sale          Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
 
   @@index([saleId])
+  @@map("sale_edit_histories")
 }
 
 model Payment {
@@ -353,6 +373,7 @@ model Payment {
   @@index([customerId])
   @@index([date])
   @@index([checkStatus])
+  @@map("payments")
 }
 
 model Installment {
@@ -377,6 +398,7 @@ model Installment {
   @@index([creditSaleId])
   @@index([status])
   @@index([dueDate])
+  @@map("installments")
 }
 
 model CreditAlert {
@@ -395,6 +417,7 @@ model CreditAlert {
   @@index([status])
   @@index([type])
   @@index([dueDate])
+  @@map("credit_alerts")
 }
 
 model DailyCash {
@@ -421,6 +444,7 @@ model DailyCash {
 
   @@index([date])
   @@index([closed])
+  @@map("daily_cash")
 }
 
 model DailyCashMovement {
@@ -469,6 +493,7 @@ model DailyCashMovement {
   @@index([date])
   @@index([type])
   @@index([paymentMethod])
+  @@map("daily_cash_movements")
 }
 
 model Budget {
@@ -496,6 +521,7 @@ model Budget {
   @@index([customerId])
   @@index([status])
   @@index([createdAt])
+  @@map("budgets")
 }
 
 model BudgetItem {
@@ -521,6 +547,7 @@ model BudgetItem {
   budget        Budget   @relation(fields: [budgetId], references: [id], onDelete: Cascade)
 
   @@index([budgetId])
+  @@map("budget_items")
 }
 
 model Note {
@@ -537,6 +564,7 @@ model Note {
 
   @@index([customerId])
   @@index([budgetId])
+  @@map("notes")
 }
 
 model CustomCategory {
@@ -546,6 +574,7 @@ model CustomCategory {
 
   @@unique([name, rubro])
   @@index([rubro])
+  @@map("custom_categories")
 }
 
 model ProductReturn {
@@ -563,6 +592,7 @@ model ProductReturn {
 
   @@index([productId])
   @@index([date])
+  @@map("product_returns")
 }
 
 model ExpenseCategory {
@@ -573,6 +603,7 @@ model ExpenseCategory {
 
   @@index([rubro])
   @@index([type])
+  @@map("expense_categories")
 }
 
 model Expense {
@@ -592,6 +623,7 @@ model Expense {
   @@index([date])
   @@index([category])
   @@index([type])
+  @@map("expenses")
 }
 
 model Promotion {
@@ -611,6 +643,7 @@ model Promotion {
   @@index([rubro])
   @@index([status])
   @@index([startDate])
+  @@map("promotions")
 }
 
 model Notification {
@@ -628,6 +661,7 @@ model Notification {
   @@index([read])
   @@index([date])
   @@index([isDeleted])
+  @@map("notifications")
 }
 
 model DeletedActualization {
@@ -635,6 +669,7 @@ model DeletedActualization {
   actualizationId Int
 
   @@index([actualizationId])
+  @@map("deleted_actualizations")
 }
 
 model UserPreferences {
@@ -648,6 +683,8 @@ model UserPreferences {
   updatedAt           DateTime @updatedAt
 
   user                User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
 }
 
 model BusinessData {
@@ -656,11 +693,15 @@ model BusinessData {
   address String
   phone   String
   cuit    String
+
+  @@map("business_data")
 }
 
 model AppState {
   id            Int      @id @default(autoincrement())
   lastActiveDate DateTime @default(now())
+
+  @@map("app_state")
 }
 
 model TrialPeriod {
@@ -669,4 +710,5 @@ model TrialPeriod {
   firstAccessDate DateTime @default(now())
 
   @@index([userId])
+  @@map("trial_periods")
 }
