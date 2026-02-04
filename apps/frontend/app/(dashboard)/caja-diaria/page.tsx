@@ -48,7 +48,7 @@ const CajaDiariaPage = () => {
   } = useDailyCashApi();
   const [dailyCashes, setDailyCashes] = useState<DailyCash[]>([]);
   const [currentDailyCash, setCurrentDailyCash] = useState<DailyCash | null>(
-    null
+    null,
   );
   const {
     isNotificationOpen,
@@ -63,10 +63,10 @@ const CajaDiariaPage = () => {
   >([]);
   const { currentPage, itemsPerPage } = usePagination();
   const [selectedMonth, setSelectedMonth] = useState<number>(
-    () => new Date().getMonth() + 1
+    () => new Date().getMonth() + 1,
   );
   const [selectedYear, setSelectedYear] = useState<number>(() =>
-    new Date().getFullYear()
+    new Date().getFullYear(),
   );
   const openDetailModal = useCallback((movements: DailyCashMovement[]) => {
     setSelectedDayMovements(movements);
@@ -81,7 +81,7 @@ const CajaDiariaPage = () => {
         value: i + 1,
         label: format(new Date(2022, i), "MMMM", { locale: es }),
       })),
-    []
+    [],
   );
   const yearOptions = useMemo(
     () =>
@@ -89,14 +89,14 @@ const CajaDiariaPage = () => {
         value: new Date().getFullYear() - i,
         label: String(new Date().getFullYear() - i),
       })),
-    []
+    [],
   );
   const checkAndCloseOldCashes = useCallback(async () => {
     const today = getLocalDateString();
     try {
       const allCashes = await fetchDailyCashes();
       const openPreviousCashes = allCashes.filter(
-        (cash) => !cash.closed && cash.date < today
+        (cash) => !cash.closed && cash.date.split("T")[0] < today,
       );
       if (openPreviousCashes.length === 0) return;
       for (const cash of openPreviousCashes) {
@@ -112,22 +112,20 @@ const CajaDiariaPage = () => {
           closedBy: "Sistema",
         });
         setDailyCashes((prev) =>
-          prev.map((dc) => (dc.id === cash.id ? updatedCash : dc))
+          prev.map((dc) => (dc.id === cash.id ? updatedCash : dc)),
         );
-        if (currentDailyCash && currentDailyCash.id === cash.id) {
-          setCurrentDailyCash(updatedCash);
-        }
+        setCurrentDailyCash(prev => (prev && prev.id === cash.id ? updatedCash : prev));
       }
     } catch (error) {
       console.error("Error al cerrar cajas antiguas:", error);
       showNotification("Error al cerrar cajas de días anteriores", "error");
     }
-  }, [currentDailyCash, showNotification, fetchDailyCashes, closeDailyCash]);
+  }, [showNotification, fetchDailyCashes, closeDailyCash]); // Removed currentDailyCash dependency
   const openCash = useCallback(async () => {
     const today = getLocalDateString();
     const allCashes = await fetchDailyCashes();
     const openPreviousCashes = allCashes.filter(
-      (cash) => !cash.closed && cash.date < today
+      (cash) => !cash.closed && cash.date.split("T")[0] < today,
     );
     if (openPreviousCashes.length > 0) {
       await checkAndCloseOldCashes();
@@ -145,7 +143,7 @@ const CajaDiariaPage = () => {
           closingDate: undefined,
         });
         setDailyCashes((prev) =>
-          prev.map((dc) => (dc.id === currentDailyCash.id ? updatedCash : dc))
+          prev.map((dc) => (dc.id === currentDailyCash.id ? updatedCash : dc)),
         );
         setCurrentDailyCash(updatedCash);
         showNotification("Caja reabierta correctamente", "success");
@@ -157,7 +155,7 @@ const CajaDiariaPage = () => {
         showNotification("Ya existe una caja abierta para hoy", "info");
         return;
       }
-      const dailyCash: Omit<DailyCash, 'id'> = {
+      const dailyCash: Omit<DailyCash, "id"> = {
         date: today,
         movements: [],
         closed: false,
@@ -193,9 +191,7 @@ const CajaDiariaPage = () => {
           .filter((m) => m.type === "EGRESO" && m.paymentMethod === "EFECTIVO")
           .reduce((sum, m) => sum + (m.amount || 0), 0);
         const otherIncome = (dailyCash.movements || [])
-          .filter(
-            (m) => m.type === "INGRESO" && m.paymentMethod !== "EFECTIVO"
-          )
+          .filter((m) => m.type === "INGRESO" && m.paymentMethod !== "EFECTIVO")
           .reduce((sum, m) => sum + (m.amount || 0), 0);
         const updatedCash = await closeDailyCash(dailyCash.id, {
           closingAmount: cashIncome - cashExpense,
@@ -204,7 +200,7 @@ const CajaDiariaPage = () => {
           otherIncome,
         });
         setDailyCashes((prev) =>
-          prev.map((dc) => (dc.id === dailyCash.id ? updatedCash : dc))
+          prev.map((dc) => (dc.id === dailyCash.id ? updatedCash : dc)),
         );
         setCurrentDailyCash(updatedCash);
         showNotification("Caja cerrada correctamente", "success");
@@ -228,7 +224,7 @@ const CajaDiariaPage = () => {
       }
     > = {};
     dailyCashes.forEach((dailyCash) => {
-      const date = dailyCash.date;
+      const date = dailyCash.date.split("T")[0];
       const movements = dailyCash.movements;
       if (!summary[date]) {
         summary[date] = {
@@ -280,12 +276,12 @@ const CajaDiariaPage = () => {
                       m.amount === movement.amount &&
                       Math.abs(
                         new Date(mCreatedAt).getTime() -
-                          new Date(movementCreatedAt).getTime()
+                          new Date(movementCreatedAt).getTime(),
                       ) < 60000)
                   );
                 })
               );
-            }
+            },
           );
           return {
             ...cash,
@@ -315,9 +311,7 @@ const CajaDiariaPage = () => {
     checkMidnightAndClose();
     return () => clearInterval(interval);
   }, [checkAndCloseOldCashes]);
-  useEffect(() => {
-    checkAndCloseOldCashes();
-  }, [checkAndCloseOldCashes]);
+
   useEffect(() => {
     const checkInitialCashStatus = async () => {
       await checkAndCloseOldCashes();
@@ -356,8 +350,8 @@ const CajaDiariaPage = () => {
                     ? "linear-gradient(135deg, #7f1d1d, #450a0a)"
                     : "linear-gradient(135deg, #065f46, #064e3b)"
                   : currentDailyCash.closed
-                  ? "linear-gradient(135deg, #f56565, #c53030)"
-                  : "linear-gradient(135deg, #48bb78, #2f855a)",
+                    ? "linear-gradient(135deg, #f56565, #c53030)"
+                    : "linear-gradient(135deg, #48bb78, #2f855a)",
               color: "white",
             }}
           >

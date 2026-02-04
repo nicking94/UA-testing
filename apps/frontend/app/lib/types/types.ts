@@ -73,9 +73,10 @@ export type ModalProps = {
   bgColor?: string;
   buttons?: React.ReactNode;
   minheight?: string;
-  zIndex?: string;
+  zIndex?: string | number;
   fixedTotal?: React.ReactNode;
   primaryButtonRef?: React.Ref<HTMLButtonElement>;
+  maxWidth?: "xs" | "sm" | "md" | "lg" | "xl" | false;
 };
 export type InputProps = {
   width?: string;

@@ -11,7 +11,6 @@ import {
   TableRow,
   Paper,
   IconButton,
-  FormControl,
   useTheme,
 } from "@mui/material";
 import {
@@ -41,9 +40,9 @@ import SearchBar from "@/app/components/SearchBar";
 import Pagination from "@/app/components/Pagination";
 import Input from "@/app/components/Input";
 import Select from "@/app/components/Select";
-import Notification from "@/app/components/Notification";
 import CustomChip from "@/app/components/CustomChip";
 import CustomGlobalTooltip from "@/app/components/CustomTooltipGlobal";
+
 const ClientesPage = () => {
   const { rubro } = useRubro();
   const theme = useTheme();
@@ -78,13 +77,7 @@ const ClientesPage = () => {
   );
   const [editingBudget, setEditingBudget] = useState<Budget | null>(null);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
-  const {
-    isNotificationOpen,
-    notificationMessage,
-    notificationType,
-    showNotification,
-    closeNotification,
-  } = useNotification();
+  const { showNotification } = useNotification();
   const { currentPage, itemsPerPage, setCurrentPage } = usePagination();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedBudget, setSelectedBudget] = useState<Budget | null>(null);
@@ -92,40 +85,52 @@ const ClientesPage = () => {
     Record<string, number>
   >({});
   const showNotificationRef = useRef(showNotification);
+
   useEffect(() => {
     showNotificationRef.current = showNotification;
   }, [showNotification]);
+
   const getTableHeaderStyle = () => ({
     bgcolor: theme.palette.mode === "dark" ? "primary.dark" : "primary.main",
     color: "primary.contrastText",
   });
+
   const statusOptions = [
     { value: "activo", label: "Activo" },
     { value: "inactivo", label: "Inactivo" },
   ];
-  const fetchCustomerBudgets = useCallback(async (customer: Customer) => {
-    if (!customer) return;
-    try {
-      const budgets = await fetchBudgets({ customerId: customer.id });
-      setCustomerBudgets(budgets);
-    } catch (error) {
-      console.error("Error al cargar presupuestos:", error);
-      showNotificationRef.current("Error al cargar los presupuestos", "error");
-    }
-  }, [fetchBudgets]);
-  const fetchCustomerSales = useCallback(async (customer: Customer) => {
-    if (!customer) return;
-    try {
-      const sales = await fetchSales({ customerId: customer.id });
-      setCustomerSales(sales);
-    } catch (error) {
-      console.error("Error al cargar ventas:", error);
-      showNotificationRef.current(
-        "Error al cargar el historial de compras",
-        "error"
-      );
-    }
-  }, [fetchSales]);
+
+  const fetchCustomerBudgets = useCallback(
+    async (customer: Customer) => {
+      if (!customer) return;
+      try {
+        const budgets = await fetchBudgets({ customerId: customer.id });
+        setCustomerBudgets(budgets);
+      } catch (error) {
+        console.error("Error al cargar presupuestos:", error);
+        showNotificationRef.current("Error al cargar los presupuestos", "error");
+      }
+    },
+    [fetchBudgets]
+  );
+
+  const fetchCustomerSales = useCallback(
+    async (customer: Customer) => {
+      if (!customer) return;
+      try {
+        const sales = await fetchSales({ customerId: customer.id });
+        setCustomerSales(sales);
+      } catch (error) {
+        console.error("Error al cargar ventas:", error);
+        showNotificationRef.current(
+          "Error al cargar el historial de compras",
+          "error"
+        );
+      }
+    },
+    [fetchSales]
+  );
+
   useEffect(() => {
     if (selectedCustomer) {
       const loadCustomerData = async () => {
@@ -140,14 +145,17 @@ const ClientesPage = () => {
       setCustomerSales([]);
     }
   }, [selectedCustomer, fetchCustomerBudgets, fetchCustomerSales]);
+
   useEffect(() => {
     const fetchCreditData = async () => {
       try {
-        await fetchSales({ credit: true });
+        // We use the data returned by fetchSales directly instead of 'allSales' from state
+        // to avoid the infinite loop caused by 'allSales' being a dependency.
+        const creditSalesData = (await fetchSales({
+          credit: true,
+        })) as CreditSale[];
         const allPayments = await paymentsApi.getAll();
-        const creditSalesData = allSales.filter(
-          (sale) => sale.credit === true
-        ) as CreditSale[];
+
         const balances: Record<string, number> = {};
         creditSalesData.forEach((sale) => {
           if (!balances[sale.customerName || ""]) {
@@ -164,7 +172,8 @@ const ClientesPage = () => {
       }
     };
     fetchCreditData();
-  }, [fetchSales, allSales]);
+  }, [fetchSales]); // Logic corrected: no allSales dependency, avoids loops.
+
   useEffect(() => {
     const loadCustomers = async () => {
       try {
@@ -182,10 +191,18 @@ const ClientesPage = () => {
         const searched = searchQuery
           ? sortedCustomers.filter(
               (customer) =>
-                customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                customer.phone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                customer.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                customer.cuitDni?.toLowerCase().includes(searchQuery.toLowerCase())
+                customer.name
+                  .toLowerCase()
+                  .includes(searchQuery.toLowerCase()) ||
+                customer.phone
+                  ?.toLowerCase()
+                  .includes(searchQuery.toLowerCase()) ||
+                customer.email
+                  ?.toLowerCase()
+                  .includes(searchQuery.toLowerCase()) ||
+                customer.cuitDni
+                  ?.toLowerCase()
+                  .includes(searchQuery.toLowerCase())
             )
           : sortedCustomers;
         setCustomers(sortedCustomers);
@@ -197,18 +214,17 @@ const ClientesPage = () => {
     };
     loadCustomers();
   }, [rubro, searchQuery, fetchCustomers, showNotification]);
+
   const indexOfLastCustomer = currentPage * itemsPerPage;
   const indexOfFirstCustomer = indexOfLastCustomer - itemsPerPage;
   const currentCustomers = filteredCustomers.slice(
     indexOfFirstCustomer,
     indexOfLastCustomer
   );
+
   const handleAddCustomer = async () => {
     if (!newCustomer.name.trim()) {
-      showNotificationRef.current(
-        "El nombre del cliente es requerido",
-        "error"
-      );
+      showNotificationRef.current("El nombre del cliente es requerido", "error");
       return;
     }
     try {
@@ -249,6 +265,7 @@ const ClientesPage = () => {
       showNotificationRef.current("Error al agregar cliente", "error");
     }
   };
+
   const generateCustomerId = (name: string): string => {
     const cleanName = name
       .trim()
@@ -257,9 +274,11 @@ const ClientesPage = () => {
     const timestamp = Date.now().toString().slice(-5);
     return `${cleanName}-${timestamp}`;
   };
+
   const getCustomerPendingBalance = (customer: Customer): number => {
     return customerBalances[customer.name] || 0;
   };
+
   const handleDeleteClick = (customer: Customer) => {
     const pendingBalance = getCustomerPendingBalance(customer);
     if (pendingBalance > 0) {
@@ -274,6 +293,7 @@ const ClientesPage = () => {
     setCustomerToDelete(customer);
     setIsDeleteModalOpen(true);
   };
+
   const handleConfirmDelete = useCallback(async () => {
     if (!customerToDelete) return;
     try {
@@ -301,6 +321,7 @@ const ClientesPage = () => {
       setCustomerToDelete(null);
     }
   }, [customerToDelete, allSales, deleteCustomer]);
+
   const handleEditClick = (customer: Customer) => {
     setEditingCustomer(customer);
     setNewCustomer({
@@ -314,12 +335,10 @@ const ClientesPage = () => {
     });
     setIsModalOpen(true);
   };
+
   const handleUpdateCustomer = async () => {
     if (!editingCustomer || !newCustomer.name.trim()) {
-      showNotificationRef.current(
-        "El nombre del cliente es requerido",
-        "error"
-      );
+      showNotificationRef.current("El nombre del cliente es requerido", "error");
       return;
     }
     try {
@@ -380,32 +399,39 @@ const ClientesPage = () => {
       showNotificationRef.current("Error al actualizar cliente", "error");
     }
   };
+
   const handleViewPurchaseHistory = useCallback((customer: Customer) => {
     setSelectedCustomer(customer);
     setIsSalesModalOpen(true);
   }, []);
+
   const handleSearch = (query: string) => {
     setSearchQuery(query);
     setCurrentPage(1);
   };
+
   const handleViewBudgetItems = useCallback((budget: Budget) => {
     setSelectedBudget(budget);
   }, []);
+
   const handleCloseBudgetsModal = useCallback(() => {
     setIsBudgetsModalOpen(false);
     setSelectedCustomer(null);
     setSelectedBudget(null);
     setCustomerBudgets([]);
   }, []);
+
   const handleCloseSalesModal = useCallback(() => {
     setIsSalesModalOpen(false);
     setSelectedCustomer(null);
     setCustomerSales([]);
   }, []);
+
   const handleOpenBudgetsModal = useCallback((customer: Customer) => {
     setSelectedCustomer(customer);
     setIsBudgetsModalOpen(true);
   }, []);
+
   const BudgetsModalContent = useMemo(() => {
     if (!selectedCustomer) return null;
     return selectedBudget ? (
@@ -619,6 +645,7 @@ const ClientesPage = () => {
     customerBudgets,
     handleViewBudgetItems,
   ]);
+
   const SalesModalContent = useMemo(() => {
     if (!selectedCustomer) return null;
     return (
@@ -674,6 +701,7 @@ const ClientesPage = () => {
       </Box>
     );
   }, [selectedCustomer, customerSales]);
+
   const DeleteCustomerModalContent = useMemo(
     () => (
       <Modal
@@ -728,6 +756,7 @@ const ClientesPage = () => {
     ),
     [isDeleteModalOpen, customerToDelete, handleConfirmDelete]
   );
+
   return (
     <ProtectedRoute>
       <Box
@@ -741,7 +770,6 @@ const ClientesPage = () => {
         <Typography variant="h5" fontWeight="semibold" mb={2}>
           Clientes
         </Typography>
-        {}
         <Box
           sx={{
             display: "flex",
@@ -780,7 +808,6 @@ const ClientesPage = () => {
             </Button>
           </Box>
         </Box>
-        {}
         <Box
           sx={{
             display: "flex",
@@ -798,232 +825,158 @@ const ClientesPage = () => {
                 <TableHead>
                   <TableRow>
                     <TableCell sx={getTableHeaderStyle()}>Nombre</TableCell>
-                    <TableCell sx={getTableHeaderStyle()} align="center">
-                      Contacto
-                    </TableCell>
+                    <TableCell sx={getTableHeaderStyle()}>Contacto</TableCell>
                     <TableCell sx={getTableHeaderStyle()} align="center">
                       Estado
                     </TableCell>
-                    {}
                     <TableCell sx={getTableHeaderStyle()} align="center">
                       Fecha de Registro
                     </TableCell>
-                    {rubro !== "Todos los rubros" && (
-                      <TableCell sx={getTableHeaderStyle()} align="center">
-                        Acciones
-                      </TableCell>
-                    )}
+                    <TableCell sx={getTableHeaderStyle()} align="center">
+                      Acciones
+                    </TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {currentCustomers.length > 0 ? (
-                    currentCustomers.map((customer) => {
-                      const pendingBalance =
-                        getCustomerPendingBalance(customer);
-                      const hasPendingBalance = pendingBalance > 0;
-                      return (
-                        <TableRow
-                          key={customer.id}
-                          sx={{
-                            border: "1px solid",
-                            borderColor: "divider",
-                            "&:hover": { backgroundColor: "action.hover" },
-                            transition: "all 0.3s",
-                          }}
-                        >
-                          <TableCell>
-                            <Box>
-                              <Typography fontWeight="bold">
-                                {customer.name}
-                              </Typography>
-                              {customer.cuitDni && (
-                                <Box
-                                  sx={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    mt: 0.5,
-                                  }}
-                                >
-                                  <Badge sx={{ fontSize: 12, mr: 0.5 }} />
-                                  <Typography
-                                    variant="caption"
-                                    color="text.secondary"
-                                  >
-                                    {customer.cuitDni}
-                                  </Typography>
-                                </Box>
-                              )}
-                            </Box>
-                          </TableCell>
-                          <TableCell align="center">
-                            <Box
-                              sx={{
-                                display: "flex",
-                                flexDirection: "column",
-                                gap: 2,
-                              }}
+                    currentCustomers.map((customer) => (
+                      <TableRow key={customer.id} hover>
+                        <TableCell>
+                          <Typography fontWeight="medium">
+                            {customer.name}
+                          </Typography>
+                          {getCustomerPendingBalance(customer) > 0 && (
+                            <Typography
+                              variant="caption"
+                              color="error"
+                              fontWeight="bold"
                             >
-                              {customer.phone && (
-                                <Typography>{customer.phone}</Typography>
-                              )}
-                              {customer.email && (
-                                <Box
-                                  sx={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                  }}
-                                >
-                                  <Email sx={{ fontSize: 12, mr: 0.5 }} />
-                                  <Typography variant="caption">
-                                    {customer.email}
-                                  </Typography>
-                                </Box>
-                              )}
-                              {!customer.phone && !customer.email && (
-                                <Typography
-                                  color="text.secondary"
-                                  variant="caption"
-                                >
-                                  Sin contacto
-                                </Typography>
-                              )}
-                            </Box>
-                          </TableCell>
-                          <TableCell align="center">
-                            <CustomChip
-                              label={customer.status}
-                              color={
-                                customer.status === "activo"
-                                  ? "success"
-                                  : "error"
-                              }
-                              size="small"
-                            />
-                          </TableCell>
-                          <TableCell align="center">
-                            {new Date(customer.createdAt).toLocaleDateString(
-                              "es-AR"
-                            )}
-                          </TableCell>
-                          {rubro !== "Todos los rubros" && (
-                            <TableCell align="center">
-                              <Box
+                              Saldo: $
+                              {getCustomerPendingBalance(customer).toFixed(2)}
+                            </Typography>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Box sx={{ display: "flex", alignItems: "center" }}>
+                            <Badge sx={{ mr: 1, fontSize: "0.875rem" }} />
+                            {customer.phone || "Sin teléfono"}
+                          </Box>
+                          <Box
+                            sx={{
+                              display: "flex",
+                              alignItems: "center",
+                              mt: 0.5,
+                            }}
+                          >
+                            <Email sx={{ mr: 1, fontSize: "0.875rem" }} />
+                            {customer.email || "Sin email"}
+                          </Box>
+                        </TableCell>
+                        <TableCell align="center">
+                          <CustomChip
+                            label={customer.status}
+                            color={
+                              customer.status === "activo"
+                                ? "success"
+                                : "default"
+                            }
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          {customer.createdAt
+                            ? new Date(customer.createdAt).toLocaleDateString(
+                                "es-AR"
+                              )
+                            : "N/A"}
+                        </TableCell>
+                        <TableCell align="center">
+                          <Box
+                            sx={{
+                              display: "flex",
+                              justifyContent: "center",
+                              gap: 1,
+                            }}
+                          >
+                            <CustomGlobalTooltip title="Historial de compras">
+                              <IconButton
+                                onClick={() =>
+                                  handleViewPurchaseHistory(customer)
+                                }
+                                size="small"
                                 sx={{
-                                  display: "flex",
-                                  justifyContent: "center",
-                                  gap: 2,
+                                  borderRadius: "4px",
+                                  color: "primary.main",
+                                  "&:hover": {
+                                    backgroundColor: "primary.main",
+                                    color: "white",
+                                  },
                                 }}
                               >
-                                <CustomGlobalTooltip title="Ver presupuestos">
-                                  <IconButton
-                                    onClick={() =>
-                                      handleOpenBudgetsModal(customer)
-                                    }
-                                    size="small"
-                                    sx={{
-                                      borderRadius: "4px",
-                                      color: "text.secondary",
-                                      "&:hover": {
-                                        backgroundColor: "primary.main",
-                                        color: "white",
-                                      },
-                                    }}
-                                  >
-                                    <Assignment fontSize="small" />
-                                  </IconButton>
-                                </CustomGlobalTooltip>
-                                <CustomGlobalTooltip title="Ver historial de compras">
-                                  <IconButton
-                                    onClick={() =>
-                                      handleViewPurchaseHistory(customer)
-                                    }
-                                    size="small"
-                                    sx={{
-                                      borderRadius: "4px",
-                                      color: "text.secondary",
-                                      "&:hover": {
-                                        backgroundColor: "primary.main",
-                                        color: "white",
-                                      },
-                                    }}
-                                  >
-                                    <Visibility fontSize="small" />
-                                  </IconButton>
-                                </CustomGlobalTooltip>
-                                <CustomGlobalTooltip title="Editar cliente">
-                                  <IconButton
-                                    onClick={() => handleEditClick(customer)}
-                                    size="small"
-                                    sx={{
-                                      borderRadius: "4px",
-                                      color: "text.secondary",
-                                      "&:hover": {
-                                        backgroundColor: "primary.main",
-                                        color: "white",
-                                      },
-                                    }}
-                                  >
-                                    <Edit fontSize="small" />
-                                  </IconButton>
-                                </CustomGlobalTooltip>
-                                <CustomGlobalTooltip
-                                  title={
-                                    hasPendingBalance
-                                      ? "Cliente tiene saldo pendiente"
-                                      : "Eliminar cliente"
-                                  }
-                                >
-                                  <span>
-                                    <IconButton
-                                      onClick={() =>
-                                        handleDeleteClick(customer)
-                                      }
-                                      size="small"
-                                      sx={{
-                                        borderRadius: "4px",
-                                        color: "text.secondary",
-                                        "&:hover": {
-                                          backgroundColor: "error.main",
-                                          color: "white",
-                                        },
-                                      }}
-                                      disabled={hasPendingBalance}
-                                    >
-                                      <Delete fontSize="small" />
-                                    </IconButton>
-                                  </span>
-                                </CustomGlobalTooltip>
-                              </Box>
-                            </TableCell>
-                          )}
-                        </TableRow>
-                      );
-                    })
+                                <Assignment fontSize="small" />
+                              </IconButton>
+                            </CustomGlobalTooltip>
+                            <CustomGlobalTooltip title="Ver presupuestos">
+                              <IconButton
+                                onClick={() => handleOpenBudgetsModal(customer)}
+                                size="small"
+                                sx={{
+                                  borderRadius: "4px",
+                                  color: "warning.main",
+                                  "&:hover": {
+                                    backgroundColor: "warning.main",
+                                    color: "white",
+                                  },
+                                }}
+                              >
+                                <Visibility fontSize="small" />
+                              </IconButton>
+                            </CustomGlobalTooltip>
+                            <CustomGlobalTooltip title="Editar">
+                              <IconButton
+                                onClick={() => handleEditClick(customer)}
+                                size="small"
+                                sx={{
+                                  borderRadius: "4px",
+                                  color: "text.secondary",
+                                  "&:hover": {
+                                    backgroundColor: "primary.main",
+                                    color: "white",
+                                  },
+                                }}
+                              >
+                                <Edit fontSize="small" />
+                              </IconButton>
+                            </CustomGlobalTooltip>
+                            <CustomGlobalTooltip title="Eliminar">
+                              <IconButton
+                                onClick={() => handleDeleteClick(customer)}
+                                size="small"
+                                sx={{
+                                  borderRadius: "4px",
+                                  color: "error.main",
+                                  "&:hover": {
+                                    backgroundColor: "error.main",
+                                    color: "white",
+                                  },
+                                }}
+                              >
+                                <Delete fontSize="small" />
+                              </IconButton>
+                            </CustomGlobalTooltip>
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    ))
                   ) : (
                     <TableRow>
-                      <TableCell
-                        colSpan={rubro !== "Todos los rubros" ? 5 : 4}
-                        align="center"
-                      >
-                        <Box
-                          sx={{
-                            display: "flex",
-                            flexDirection: "column",
-                            alignItems: "center",
-                            color: "text.secondary",
-                            py: 4,
-                          }}
-                        >
-                          <Groups
-                            sx={{ fontSize: 64, color: "grey.400", mb: 2 }}
-                          />
-                          <Typography>
-                            {searchQuery
-                              ? "No se encontraron clientes"
-                              : "No hay clientes registrados"}
-                          </Typography>
-                        </Box>
+                      <TableCell colSpan={5} align="center" sx={{ py: 8 }}>
+                        <Groups
+                          sx={{ fontSize: 64, color: "grey.400", mb: 2 }}
+                        />
+                        <Typography color="text.secondary">
+                          No hay clientes registrados
+                        </Typography>
                       </TableCell>
                     </TableRow>
                   )}
@@ -1031,49 +984,23 @@ const ClientesPage = () => {
               </Table>
             </TableContainer>
           </Box>
-          {filteredCustomers.length > 0 && (
-            <Pagination
-              text="Clientes por página"
-              text2="Total de clientes"
-              totalItems={filteredCustomers.length}
-            />
-          )}
+          <Pagination
+            text="Clientes por página"
+            text2="Total de clientes"
+            totalItems={filteredCustomers.length}
+          />
         </Box>
-        {}
+
         <Modal
           isOpen={isModalOpen}
-          onClose={() => {
-            setIsModalOpen(false);
-            setEditingCustomer(null);
-            setNewCustomer({
-              name: "",
-              phone: "",
-              email: "",
-              address: "",
-              cuitDni: "",
-              status: "activo",
-              pendingBalance: 0,
-            });
-          }}
+          onClose={() => setIsModalOpen(false)}
           title={editingCustomer ? "Editar Cliente" : "Nuevo Cliente"}
           bgColor="bg-white dark:bg-gray_b"
           buttons={
             <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 2 }}>
               <Button
                 variant="text"
-                onClick={() => {
-                  setIsModalOpen(false);
-                  setEditingCustomer(null);
-                  setNewCustomer({
-                    name: "",
-                    phone: "",
-                    email: "",
-                    address: "",
-                    cuitDni: "",
-                    status: "activo",
-                    pendingBalance: 0,
-                  });
-                }}
+                onClick={() => setIsModalOpen(false)}
                 sx={{
                   color: "text.secondary",
                   borderColor: "text.secondary",
@@ -1090,189 +1017,93 @@ const ClientesPage = () => {
                 onClick={
                   editingCustomer ? handleUpdateCustomer : handleAddCustomer
                 }
-                isPrimaryAction={true}
                 sx={{
                   bgcolor: "primary.main",
                   "&:hover": { bgcolor: "primary.dark" },
                 }}
               >
-                {editingCustomer ? "Actualizar" : "Agregar"}
+                {editingCustomer ? "Actualizar" : "Guardar"}
               </Button>
             </Box>
           }
         >
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <Box
-              sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}
-            >
-              <Input
-                label="Nombre del cliente"
-                value={newCustomer.name}
-                onRawChange={(e) =>
-                  setNewCustomer({ ...newCustomer, name: e.target.value })
-                }
-                placeholder="Ingrese el nombre completo"
-                required
-              />
+            <Input
+              label="Nombre y Apellido"
+              value={newCustomer.name}
+              onChange={(v) => setNewCustomer({ ...newCustomer, name: String(v) })}
+              required
+            />
+            <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
               <Input
                 label="Teléfono"
                 value={newCustomer.phone || ""}
-                onRawChange={(e) =>
-                  setNewCustomer({ ...newCustomer, phone: e.target.value })
-                }
-                placeholder="Ingrese el número de teléfono"
-              />
-            </Box>
-            <Box
-              sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}
-            >
-              <Input
-                label="Email"
-                type="email"
-                value={newCustomer.email || ""}
-                onRawChange={(e) =>
-                  setNewCustomer({ ...newCustomer, email: e.target.value })
-                }
-                placeholder="Ingrese el email"
+                onChange={(v) => setNewCustomer({ ...newCustomer, phone: String(v) })}
               />
               <Input
-                label="CUIT/DNI"
+                label="CUIT / DNI"
                 value={newCustomer.cuitDni || ""}
-                onRawChange={(e) =>
-                  setNewCustomer({ ...newCustomer, cuitDni: e.target.value })
-                }
-                placeholder="Ingrese CUIT o DNI"
+                onChange={(v) => setNewCustomer({ ...newCustomer, cuitDni: String(v) })}
               />
             </Box>
-            <Box
-              sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}
-            >
-              <FormControl fullWidth>
-                <Select
-                  label="Estado"
-                  value={newCustomer.status}
-                  options={statusOptions}
-                  onChange={(value) =>
-                    setNewCustomer({
-                      ...newCustomer,
-                      status: value as "activo" | "inactivo",
-                    })
-                  }
-                  fullWidth
-                />
-              </FormControl>
-              <Input
-                label="Dirección"
-                value={newCustomer.address || ""}
-                onRawChange={(e) =>
-                  setNewCustomer({ ...newCustomer, address: e.target.value })
-                }
-                placeholder="Ingrese la dirección"
-              />
-            </Box>
+            <Input
+              label="Email"
+              value={newCustomer.email || ""}
+              onChange={(v) => setNewCustomer({ ...newCustomer, email: String(v) })}
+            />
+            <Input
+              label="Dirección"
+              value={newCustomer.address || ""}
+              onChange={(v) => setNewCustomer({ ...newCustomer, address: String(v) })}
+            />
+            <Select
+              label="Estado"
+              value={newCustomer.status}
+              options={statusOptions}
+              onChange={(v) =>
+                setNewCustomer({
+                  ...newCustomer,
+                  status: v as "activo" | "inactivo",
+                })
+              }
+            />
           </Box>
         </Modal>
-        {}
+
+        <Modal
+          isOpen={isBudgetsModalOpen}
+          onClose={handleCloseBudgetsModal}
+          title={`Presupuestos - ${selectedCustomer?.name || ""}`}
+          bgColor="bg-white dark:bg-gray_b"
+          maxWidth="md"
+          buttons={
+            <Button variant="contained" onClick={handleCloseBudgetsModal}>
+              Cerrar
+            </Button>
+          }
+        >
+          {BudgetsModalContent}
+        </Modal>
+
+        <Modal
+          isOpen={isSalesModalOpen}
+          onClose={handleCloseSalesModal}
+          title={`Historial de Compras - ${selectedCustomer?.name || ""}`}
+          bgColor="bg-white dark:bg-gray_b"
+          maxWidth="md"
+          buttons={
+            <Button variant="contained" onClick={handleCloseSalesModal}>
+              Cerrar
+            </Button>
+          }
+        >
+          {SalesModalContent}
+        </Modal>
+
         {DeleteCustomerModalContent}
-        {}
-        {isBudgetsModalOpen && (
-          <Modal
-            isOpen={isBudgetsModalOpen}
-            onClose={handleCloseBudgetsModal}
-            title={
-              selectedBudget
-                ? "Detalles del Presupuesto"
-                : `Presupuestos de ${selectedCustomer?.name || ""}`
-            }
-            bgColor="bg-white dark:bg-gray_b"
-            buttons={
-              <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 2 }}>
-                {selectedBudget ? (
-                  <>
-                    <Button
-                      variant="text"
-                      onClick={handleCloseBudgetsModal}
-                      sx={{
-                        color: "text.secondary",
-                        borderColor: "text.secondary",
-                        "&:hover": {
-                          backgroundColor: "action.hover",
-                          borderColor: "text.primary",
-                        },
-                      }}
-                    >
-                      Cerrar
-                    </Button>
-                    <Button
-                      variant="contained"
-                      onClick={() => setSelectedBudget(null)}
-                      isPrimaryAction={true}
-                      sx={{
-                        bgcolor: "primary.main",
-                        "&:hover": { bgcolor: "primary.dark" },
-                      }}
-                    >
-                      Volver
-                    </Button>
-                  </>
-                ) : (
-                  <Button
-                    variant="text"
-                    onClick={handleCloseBudgetsModal}
-                    sx={{
-                      color: "text.secondary",
-                      borderColor: "text.secondary",
-                      "&:hover": {
-                        backgroundColor: "action.hover",
-                        borderColor: "text.primary",
-                      },
-                    }}
-                  >
-                    Cerrar
-                  </Button>
-                )}
-              </Box>
-            }
-          >
-            {BudgetsModalContent}
-          </Modal>
-        )}
-        {isSalesModalOpen && (
-          <Modal
-            isOpen={isSalesModalOpen}
-            onClose={handleCloseSalesModal}
-            title={`Historial de Compras - ${selectedCustomer?.name || ""}`}
-            bgColor="bg-white dark:bg-gray_b"
-            buttons={
-              <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 2 }}>
-                <Button
-                  variant="text"
-                  onClick={handleCloseSalesModal}
-                  sx={{
-                    color: "text.secondary",
-                    borderColor: "text.secondary",
-                    "&:hover": {
-                      backgroundColor: "action.hover",
-                      borderColor: "text.primary",
-                    },
-                  }}
-                >
-                  Cerrar
-                </Button>
-              </Box>
-            }
-          >
-            {SalesModalContent}
-          </Modal>
-        )}
-        <Notification
-          isOpen={isNotificationOpen}
-          message={notificationMessage}
-          type={notificationType}
-          onClose={closeNotification}
-        />
       </Box>
     </ProtectedRoute>
   );
 };
+
 export default ClientesPage;
