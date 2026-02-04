@@ -24,17 +24,15 @@ import {
   Assignment,
 } from "@mui/icons-material";
 import { useRubro } from "@/app/context/RubroContext";
-import { Budget, CreditSale, Customer, Sale } from "@/app/lib/types/types";
+import { Budget, Customer, Sale } from "@/app/lib/types/types";
 import { useNotification } from "@/app/hooks/useNotification";
 import { useCustomersApi } from "@/app/hooks/useCustomersApi";
 import { useSalesApi } from "@/app/hooks/useSalesApi";
 import { useBudgetsApi } from "@/app/hooks/useBudgetsApi";
-import { paymentsApi } from "@/app/lib/api/payments";
 import { CustomerFilters } from "@/app/lib/api/customers";
 import Modal from "@/app/components/Modal";
 import Button from "@/app/components/Button";
 import ProtectedRoute from "@/app/components/ProtectedRoute";
-import { calculateCustomerBalance } from "@/app/lib/utils/balanceCalculations";
 import { usePagination } from "@/app/context/PaginationContext";
 import SearchBar from "@/app/components/SearchBar";
 import Pagination from "@/app/components/Pagination";
@@ -81,9 +79,6 @@ const ClientesPage = () => {
   const { currentPage, itemsPerPage, setCurrentPage } = usePagination();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedBudget, setSelectedBudget] = useState<Budget | null>(null);
-  const [customerBalances, setCustomerBalances] = useState<
-    Record<string, number>
-  >({});
   const showNotificationRef = useRef(showNotification);
 
   useEffect(() => {
@@ -146,33 +141,7 @@ const ClientesPage = () => {
     }
   }, [selectedCustomer, fetchCustomerBudgets, fetchCustomerSales]);
 
-  useEffect(() => {
-    const fetchCreditData = async () => {
-      try {
-        // We use the data returned by fetchSales directly instead of 'allSales' from state
-        // to avoid the infinite loop caused by 'allSales' being a dependency.
-        const creditSalesData = (await fetchSales({
-          credit: true,
-        })) as CreditSale[];
-        const allPayments = await paymentsApi.getAll();
 
-        const balances: Record<string, number> = {};
-        creditSalesData.forEach((sale) => {
-          if (!balances[sale.customerName || ""]) {
-            balances[sale.customerName || ""] = calculateCustomerBalance(
-              sale.customerName || "",
-              creditSalesData,
-              allPayments
-            );
-          }
-        });
-        setCustomerBalances(balances);
-      } catch (error) {
-        console.error("Error al cargar datos de cuentas corrientes:", error);
-      }
-    };
-    fetchCreditData();
-  }, [fetchSales]); // Logic corrected: no allSales dependency, avoids loops.
 
   useEffect(() => {
     const loadCustomers = async () => {
@@ -276,7 +245,7 @@ const ClientesPage = () => {
   };
 
   const getCustomerPendingBalance = (customer: Customer): number => {
-    return customerBalances[customer.name] || 0;
+    return customer.pendingBalance || 0;
   };
 
   const handleDeleteClick = (customer: Customer) => {

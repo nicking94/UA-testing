@@ -184,6 +184,7 @@ model Sale {
   concept                String?
   edited                 Boolean?          @default(false)
   priceListId            Int?
+  rubro                  Rubro?
   createdAt              DateTime          @default(now())
   updatedAt              DateTime          @updatedAt
   creditAlerts           CreditAlert[]
@@ -371,6 +372,10 @@ model DailyCashMovement {
   expenseCategory        String?
   customerName           String?
   customerId             String?
+  paymentId              Int?
+  expenseId              Int?
+  productReturnId        Int?
+  installmentId          Int?
   createdAt              DateTime       @default(now())
   timestamp              DateTime?
   dailyCash              DailyCash?     @relation(fields: [dailyCashId], references: [id], onDelete: Cascade)
@@ -467,6 +472,7 @@ model ProductReturn {
   reason      String
   date        DateTime @default(now()) @db.Date
   stockAdded  Float
+  unit        Unit?
   amount      Float
   profit      Float
   rubro       Rubro

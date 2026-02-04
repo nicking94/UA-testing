@@ -29,14 +29,13 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { dailyCashApi } from "@/app/lib/api/daily-cash";
 import { productPricesApi } from "@/app/lib/api/product-prices";
-import { productsApi } from "@/app/lib/api/products";
-import { paymentsApi } from "@/app/lib/api/payments";
 import { promotionsApi } from "@/app/lib/api/promotions";
 import { priceListsApi } from "@/app/lib/api/price-lists";
 import { useSalesApi } from "@/app/hooks/useSalesApi";
 import { useProductsApi } from "@/app/hooks/useProductsApi";
 import { useCustomersApi } from "@/app/hooks/useCustomersApi";
 import { customersApi, CustomerFilters } from "@/app/lib/api/customers";
+import { productsApi } from "@/app/lib/api/products";
 import { parseISO, format } from "date-fns";
 import { es } from "date-fns/locale";
 import ProtectedRoute from "@/app/components/ProtectedRoute";
@@ -75,11 +74,10 @@ import {
   UnitOption,
   Option,
   PaymentMethod,
-  Payment,
-  ProductOption,
   EditMode,
   PriceList,
   CreditInstallmentDetails,
+  ProductOption,
 } from "@/app/lib/types/types";
 import Select from "@/app/components/Select";
 import { Settings } from "@mui/icons-material";
@@ -492,6 +490,21 @@ const VentasPage = () => {
       setProducts(storedProducts);
     }
   };
+  const updateStockAfterSale = async (
+    productId: number,
+    quantity: number,
+    unit: string
+  ): Promise<number> => {
+    const product = await productsApi.getById(productId);
+    if (!product) throw new Error("Producto no encontrado");
+
+    const stockInBase = convertToBaseUnit(Number(product.stock), product.unit);
+    const soldInBase = convertToBaseUnit(quantity, unit);
+    const newStockInBase = stockInBase - soldInBase;
+    
+    return parseFloat(convertFromBaseUnit(newStockInBase, product.unit).toFixed(3));
+  };
+
   const handleSaveEdit = async () => {
     if (
       !isEditMode.isEditing ||
@@ -523,7 +536,7 @@ const VentasPage = () => {
       }
       for (const product of newSale.products) {
         try {
-          const updatedStock = updateStockAfterSale(
+          const updatedStock = await updateStockAfterSale(
             product.id,
             product.quantity,
             product.unit
@@ -1245,27 +1258,7 @@ const VentasPage = () => {
           return;
         }
       }
-      for (const product of newSale.products) {
-        try {
-          const updatedStock = updateStockAfterSale(
-            product.id,
-            product.quantity,
-            product.unit
-          );
-          await productsApi.update(product.id, { stock: updatedStock });
-        } catch (error) {
-          console.error(
-            `Error actualizando stock para producto ${product.id}:`,
-            error
-          );
-          showNotification(
-            `Error actualizando stock para ${product.name}`,
-            "error"
-          );
-          setIsProcessingPayment(false);
-          return;
-        }
-      }
+
       let customerId = selectedCustomer?.value;
       let finalCustomerName = "";
       let finalCustomerPhone = "";
@@ -1312,7 +1305,6 @@ const VentasPage = () => {
           customerId = customer.id;
           finalCustomerName = customer.name;
           finalCustomerPhone = customer.phone || "";
-          await customersApi.updateBalance(customerId, newSale.total);
         }
       } else if (selectedCustomer && !hasCreditMethod && !isCredit) {
         const customer = customers.find((c) => c.id === selectedCustomer.value);
@@ -1326,8 +1318,7 @@ const VentasPage = () => {
       }
       const saleToSave: Omit<Sale, 'id'> = {
         products: newSale.products,
-        paymentMethods:
-          isCredit || hasCreditMethod ? [] : newSale.paymentMethods,
+        paymentMethods: newSale.paymentMethods, // Always include payment methods
         total: newSale.total,
         date: new Date().toISOString(),
         barcode: newSale.barcode || "",
@@ -1398,35 +1389,11 @@ const VentasPage = () => {
           })),
         };
         savedSale = await addSale(saleWithInstallments);
-        if (customerId) {
-          await customersApi.updateBalance(customerId, totalWithInterest);
-        }
       }
       else {
         savedSale = await addSale(saleToSave);
       }
-      if (isCredit && registerCheck) {
-        const chequePayment: Payment = {
-          id: Date.now(),
-          saleId: savedSale.id,
-          saleDate: savedSale.date,
-          amount: newSale.total,
-          date: new Date().toISOString(),
-          method: "CHEQUE" as PaymentMethod,
-          checkStatus: "pendiente",
-          customerName: finalCustomerName,
-          customerId: customerId,
-        };
-        await paymentsApi.create(chequePayment);
-        const saleForDailyCash: Sale = {
-          ...savedSale,
-          paymentMethods: [{ method: "CHEQUE", amount: newSale.total }],
-        };
-        await addIncomeToDailyCash(saleForDailyCash);
-      }
-      if (!isCredit && !hasCreditMethod) {
-        await addIncomeToDailyCash(savedSale);
-      }
+      
       setSales([...sales, savedSale]);
       if (selectedPromotions && selectedPromotions.id) {
         await promotionsApi.update(selectedPromotions.id, {
@@ -1439,9 +1406,6 @@ const VentasPage = () => {
             (p.rubro === rubro || p.rubro === "Todos los rubros")
         );
         setAvailablePromotions(activePromotions);
-      }
-      if (customerId && finalCustomerName !== "CLIENTE OCASIONAL") {
-        await updateCustomerPurchaseHistory(customerId, savedSale);
       }
       if (isCredit || hasCreditMethod) {
         showNotification(
@@ -1503,32 +1467,7 @@ const VentasPage = () => {
       setIsProcessingPayment(false);
     }
   };
-  const updateStockAfterSale = (
-    productId: number,
-    soldQuantity: number,
-    unit: string
-  ): number => {
-    const product = products.find((p) => p.id === productId);
-    if (!product) throw new Error(`Producto con ID ${productId} no encontrado`);
-    const stockCheck = checkStockAvailability(product, soldQuantity, unit);
-    if (!stockCheck.available) {
-      throw new Error(
-        `Stock insuficiente para ${product.name}. ` +
-          `Solicitado: ${soldQuantity} ${unit}, ` +
-          `Disponible: ${stockCheck.availableQuantity.toFixed(2)} ${
-            stockCheck.availableUnit
-          }`
-      );
-    }
-    const soldInBase = convertToBaseUnit(soldQuantity, unit);
-    const currentStockInBase = convertToBaseUnit(
-      Number(product.stock),
-      product.unit
-    );
-    const newStockInBase = currentStockInBase - soldInBase;
-    const newStock = convertFromBaseUnit(newStockInBase, product.unit);
-    return parseFloat(newStock.toFixed(3));
-  };
+
   const filteredSales = sales
     .filter((sale) => {
       const saleDate = new Date(sale.date);
@@ -1547,97 +1486,7 @@ const VentasPage = () => {
       return matchesMonth && matchesYear && matchesRubro;
     })
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  const addIncomeToDailyCash = async (sale: Sale) => {
-    try {
-      const today = getLocalDateString();
-      let dailyCash = await dailyCashApi.getByDate(today);
-      const totalProfit = calculateTotalProfit(
-        sale.products,
-        sale.manualAmount || 0,
-        sale.manualProfitPercentage || 0
-      );
-      const baseTimestamp = new Date().toISOString();
-      const movements: DailyCashMovement[] = [];
-      if (sale.paymentMethods.length === 1) {
-        const movement: DailyCashMovement = {
-          id: Date.now(),
-          amount: sale.total,
-          description: `Venta - ${sale.concept || "general"}`,
-          type: "INGRESO",
-          date: baseTimestamp,
-          paymentMethod: sale.paymentMethods[0]?.method || "EFECTIVO",
-          items: sale.products.map((p) => {
-            const priceInfo = calculatePrice(p, p.quantity, p.unit);
-            return {
-              productId: p.id,
-              productName: p.name,
-              quantity: p.quantity,
-              unit: p.unit,
-              price: priceInfo.finalPrice / p.quantity,
-              costPrice: p.costPrice,
-              profit: priceInfo.profit,
-              size: p.size,
-              color: p.color,
-            };
-          }),
-          profit: totalProfit,
-          combinedPaymentMethods: sale.paymentMethods,
-          customerName: sale.customerName || "CLIENTE OCASIONAL",
-          createdAt: new Date().toISOString(),
-        };
-        movements.push(movement);
-      } else {
-        const mainMovement: DailyCashMovement = {
-          id: Date.now(),
-          amount: sale.total,
-          description: `Venta - ${sale.concept || "general"}`,
-          type: "INGRESO",
-          date: baseTimestamp,
-          paymentMethod: "EFECTIVO",
-          items: sale.products.map((p) => {
-            const priceInfo = calculatePrice(p, p.quantity, p.unit);
-            return {
-              productId: p.id,
-              productName: p.name,
-              quantity: p.quantity,
-              unit: p.unit,
-              price: priceInfo.finalPrice / p.quantity,
-              costPrice: p.costPrice,
-              profit: priceInfo.profit,
-              size: p.size,
-              color: p.color,
-            };
-          }),
-          profit: totalProfit,
-          combinedPaymentMethods: sale.paymentMethods,
-          customerName: sale.customerName || "CLIENTE OCASIONAL",
-          createdAt: new Date().toISOString(),
-        };
-        movements.push(mainMovement);
-      }
-      if (!dailyCash) {
-        dailyCash = {
-          id: Date.now(),
-          date: today,
-          movements: movements,
-          closed: false,
-          totalIncome: sale.total,
-          totalExpense: 0,
-        };
-        await dailyCashApi.create(dailyCash);
-      } else {
-        const updatedCash = {
-          ...dailyCash,
-          movements: [...dailyCash.movements, ...movements],
-          totalIncome: (dailyCash.totalIncome || 0) + sale.total,
-        };
-        await dailyCashApi.update(dailyCash.id, updatedCash);
-      }
-    } catch (error) {
-      console.error("Error al registrar ingreso:", error);
-      throw error;
-    }
-  };
+
   const handleRegisterCheckChange = (checked: boolean) => {
     setRegisterCheck(checked);
     if (checked) {
@@ -1946,23 +1795,7 @@ const VentasPage = () => {
     }
     setIsOpenModal(true);
   }, [rubro]);
-  const updateCustomerPurchaseHistory = async (
-    customerId: string,
-    sale: Sale
-  ) => {
-    try {
-      const customer = await customersApi.getById(customerId);
-      if (customer) {
-        const updatedPurchaseHistory = [...customer.purchaseHistory, sale];
-        await customersApi.update(customerId, {
-          purchaseHistory: updatedPurchaseHistory,
-          updatedAt: new Date().toISOString(),
-        });
-      }
-    } catch (error) {
-      console.error("Error al actualizar historial del cliente:", error);
-    }
-  };
+
   const handleOpenInfoModal = (sale: Sale) => {
     if (!sale) {
       showNotification("Error: Venta no válida", "error");

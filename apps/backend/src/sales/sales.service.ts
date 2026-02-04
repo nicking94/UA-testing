@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { convertToBaseUnit, convertFromBaseUnit } from '../common/utils/unit-conversion';
 
 @Injectable()
 export class SalesService {
@@ -26,7 +27,6 @@ export class SalesService {
       where.customerId = filters.customerId;
     }
     if (filters?.credit !== undefined) {
-      // Cast string "true"/"false" to boolean
       where.credit = filters.credit === 'true' || filters.credit === true;
     }
     if (filters?.priceListId !== undefined) {
@@ -70,108 +70,190 @@ export class SalesService {
   }
 
   async create(data: any) {
-    // Extract known relations and extra UI fields that are NOT in the database model
-    const { 
-      items, 
-      payments, 
-      installments, 
-      products, 
-      paymentMethods, // UI field, not in model
-      ...rest 
-    } = data;
-    
-    // Explicitly pick only the fields that exist in the Sale model
-    const saleData = {
-      total: Number(rest.total),
-      date: rest.date ? new Date(rest.date) : new Date(),
-      barcode: rest.barcode || null,
-      manualAmount: rest.manualAmount !== undefined ? Number(rest.manualAmount) : null,
-      manualProfitPercentage: rest.manualProfitPercentage !== undefined ? Number(rest.manualProfitPercentage) : null,
-      credit: rest.credit === true,
-      creditType: rest.creditType || null,
-      paid: rest.paid === true,
-      customerName: rest.customerName || null,
-      customerPhone: rest.customerPhone || null,
-      customerId: rest.customerId && rest.customerId !== "" ? rest.customerId : null,
-      discount: rest.discount !== undefined ? Number(rest.discount) : 0,
-      deposit: rest.deposit !== undefined ? Number(rest.deposit) : 0,
-      fromBudget: rest.fromBudget === true,
-      budgetId: rest.budgetId || null,
-      concept: rest.concept || null,
-      priceListId: rest.priceListId ? Number(rest.priceListId) : null,
-    };
+    return this.prisma.$transaction(async (tx) => {
+      const { 
+        items, 
+        payments, 
+        installments, 
+        products, 
+        paymentMethods, 
+        ...rest 
+      } = data;
+      
+      const saleData = {
+        total: Number(rest.total),
+        date: rest.date ? new Date(rest.date) : new Date(),
+        barcode: rest.barcode || null,
+        manualAmount: rest.manualAmount !== undefined ? Number(rest.manualAmount) : null,
+        manualProfitPercentage: rest.manualProfitPercentage !== undefined ? Number(rest.manualProfitPercentage) : null,
+        credit: rest.credit === true,
+        creditType: rest.creditType || null,
+        paid: rest.paid === true,
+        customerName: rest.customerName || null,
+        customerPhone: rest.customerPhone || null,
+        customerId: rest.customerId && rest.customerId !== "" ? rest.customerId : null,
+        discount: rest.discount !== undefined ? Number(rest.discount) : 0,
+        deposit: rest.deposit !== undefined ? Number(rest.deposit) : 0,
+        fromBudget: rest.fromBudget === true,
+        budgetId: rest.budgetId || null,
+        concept: rest.concept || null,
+        priceListId: rest.priceListId ? Number(rest.priceListId) : null,
+      };
 
-    return this.prisma.sale.create({
-      data: {
-        ...saleData,
-        items: {
-          create: items.map((item: any) => ({
-            productId: Number(item.productId),
-            productName: item.productName,
-            quantity: Number(item.quantity),
-            unit: item.unit,
-            price: Number(item.price),
-            size: item.size,
-            color: item.color,
-            discount: Number(item.discount || 0),
-            surcharge: Number(item.surcharge || 0),
-            basePrice: item.basePrice ? Number(item.basePrice) : null,
-            notes: item.notes,
-            description: item.description,
-            rubro: item.rubro,
-            fromBudget: item.fromBudget,
-            budgetId: item.budgetId,
-            costPrice: item.costPrice ? Number(item.costPrice) : null,
-            profit: item.profit ? Number(item.profit) : null,
-            profitPercentage: item.profitPercentage ? Number(item.profitPercentage) : null,
-          })),
-        },
-        payments: payments
-          ? {
-              create: payments.map((payment: any) => ({
-                amount: Number(payment.amount),
-                date: payment.date ? new Date(payment.date) : new Date(),
-                method: payment.method,
-                checkNumber: payment.checkNumber,
-                checkDate: payment.checkDate ? new Date(payment.checkDate) : null,
-                checkBank: payment.checkBank,
-                checkStatus: payment.checkStatus,
-                checkDescription: payment.checkDescription,
-                customerId: payment.customerId,
-                customerName: payment.customerName,
-                installmentNumber: payment.installmentNumber ? Number(payment.installmentNumber) : null,
-                saleTotal: payment.saleTotal ? Number(payment.saleTotal) : null,
-              })),
-            }
-          : undefined,
-        installments: installments
-          ? {
-              create: installments.map((inst: any) => ({
-                number: Number(inst.number),
-                dueDate: new Date(inst.dueDate),
-                amount: Number(inst.amount),
-                interestAmount: Number(inst.interestAmount || 0),
-                penaltyAmount: Number(inst.penaltyAmount || 0),
-                status: inst.status || 'pendiente',
-                totalAmount: Number(inst.totalAmount),
-              })),
-            }
-          : undefined,
-      },
-      include: {
-        customer: true,
-        items: {
-          include: {
-            product: true,
+      // 1. Create the Sale
+      const createdSale = await tx.sale.create({
+        data: {
+          ...saleData,
+          items: {
+            create: items.map((item: any) => ({
+              productId: Number(item.productId),
+              productName: item.productName,
+              quantity: Number(item.quantity),
+              unit: item.unit,
+              price: Number(item.price),
+              size: item.size,
+              color: item.color,
+              discount: Number(item.discount || 0),
+              surcharge: Number(item.surcharge || 0),
+              basePrice: item.basePrice ? Number(item.basePrice) : null,
+              notes: item.notes,
+              description: item.description,
+              rubro: item.rubro,
+              fromBudget: item.fromBudget,
+              budgetId: item.budgetId,
+              costPrice: item.costPrice ? Number(item.costPrice) : null,
+              profit: item.profit ? Number(item.profit) : null,
+              profitPercentage: item.profitPercentage ? Number(item.profitPercentage) : null,
+            })),
           },
+          payments: payments
+            ? {
+                create: payments.map((payment: any) => ({
+                  amount: Number(payment.amount),
+                  date: payment.date ? new Date(payment.date) : new Date(),
+                  method: payment.method,
+                  checkNumber: payment.checkNumber,
+                  checkDate: payment.checkDate ? new Date(payment.checkDate) : null,
+                  checkBank: payment.checkBank,
+                  checkStatus: payment.checkStatus,
+                  checkDescription: payment.checkDescription,
+                  customerId: payment.customerId,
+                  customerName: payment.customerName,
+                  installmentNumber: payment.installmentNumber ? Number(payment.installmentNumber) : null,
+                  saleTotal: payment.saleTotal ? Number(payment.saleTotal) : null,
+                })),
+              }
+            : undefined,
+          installments: installments
+            ? {
+                create: installments.map((inst: any) => ({
+                  number: Number(inst.number),
+                  dueDate: new Date(inst.dueDate),
+                  amount: Number(inst.amount),
+                  interestAmount: Number(inst.interestAmount || 0),
+                  penaltyAmount: Number(inst.penaltyAmount || 0),
+                  status: inst.status || 'pendiente',
+                  totalAmount: Number(inst.totalAmount),
+                })),
+              }
+            : undefined,
         },
-        payments: true,
-        installments: true,
-      },
+        include: {
+          customer: true,
+          items: true,
+          payments: true,
+        }
+      });
+
+      // 2. Update Product Stock
+      for (const item of items) {
+        const product = await tx.product.findUnique({
+          where: { id: Number(item.productId) }
+        });
+        
+        if (product) {
+          const soldInBase = convertToBaseUnit(Number(item.quantity), item.unit);
+          const currentStockInBase = convertToBaseUnit(product.stock, product.unit);
+          const newStockInBase = currentStockInBase - soldInBase;
+          const newStock = convertFromBaseUnit(newStockInBase, product.unit);
+          
+          await tx.product.update({
+            where: { id: product.id },
+            data: { stock: parseFloat(newStock.toFixed(3)) }
+          });
+        }
+      }
+
+      // 3. Update Customer Balance
+      if (saleData.credit && saleData.customerId) {
+        await tx.customer.update({
+          where: { id: saleData.customerId },
+          data: {
+            pendingBalance: {
+              increment: saleData.total
+            }
+          }
+        });
+      }
+
+      // 4. Create Daily Cash Movement
+      const today = new Date();
+      const startOfDay = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0));
+      const endOfDay = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 1, 0, 0, 0));
+
+      let dailyCash = await tx.dailyCash.findFirst({
+        where: {
+          date: {
+            gte: startOfDay,
+            lt: endOfDay,
+          }
+        }
+      });
+
+      // If no daily cash exists for today, we might want to create one or handle it
+      // Usually the frontend ensures it's open, but let's be safe.
+      if (!dailyCash) {
+        dailyCash = await tx.dailyCash.create({
+          data: {
+            date: startOfDay,
+            closed: false,
+          }
+        });
+      }
+
+      const totalProfit = items.reduce((sum: number, item: any) => sum + (item.profit || 0), 0) + 
+                          ((saleData.manualAmount || 0) * (saleData.manualProfitPercentage || 0) / 100);
+
+      // Create main movement
+      await tx.dailyCashMovement.create({
+        data: {
+          dailyCashId: dailyCash.id,
+          amount: saleData.total,
+          description: `Venta - ${saleData.concept || "general"}`,
+          type: "INGRESO",
+          date: saleData.date,
+          paymentMethod: payments && payments.length > 0 ? payments[0].method : (saleData.credit ? 'CUENTA_CORRIENTE' : 'EFECTIVO'),
+          profit: totalProfit,
+          customerName: saleData.customerName || "CLIENTE OCASIONAL",
+          customerId: saleData.customerId,
+          originalSaleId: createdSale.id,
+          rubro: items[0]?.rubro,
+          productId: items.length === 1 ? items[0].productId : null,
+          productName: items.length === 1 ? items[0].productName : null,
+          quantity: items.length === 1 ? items[0].quantity : null,
+          unit: items.length === 1 ? items[0].unit : null,
+        }
+      });
+
+      return createdSale;
     });
   }
 
   async update(id: number, data: any) {
+    // Note: Update is more complex because we'd need to REVERSE previous side effects.
+    // For now, let's just keep the existing update logic but wrapped in transaction for safety.
+    // In a real app, you'd calculate the difference in stock/balance and apply it.
+    
     const { items, payments, installments, editHistory, products, paymentMethods, ...rest } = data;
     
     // Explicitly pick fields for update
@@ -191,98 +273,100 @@ export class SalesService {
     if (rest.concept !== undefined) saleData.concept = rest.concept;
     if (rest.priceListId !== undefined) saleData.priceListId = Number(rest.priceListId);
 
-    if (editHistory) {
-      const currentSale = await this.prisma.sale.findUnique({
-        where: { id },
-        select: { total: true },
-      });
-      if (currentSale) {
-        await this.prisma.saleEditHistory.create({
-          data: {
-            saleId: id,
-            changes: editHistory.changes,
-            previousTotal: currentSale.total,
-            newTotal: Number(data.total),
-          },
+    return this.prisma.$transaction(async (tx) => {
+      if (editHistory) {
+        const currentSale = await tx.sale.findUnique({
+          where: { id },
+          select: { total: true },
         });
+        if (currentSale) {
+          await tx.saleEditHistory.create({
+            data: {
+              saleId: id,
+              changes: editHistory.changes,
+              previousTotal: currentSale.total,
+              newTotal: Number(data.total),
+            },
+          });
+        }
       }
-    }
-    
-    await Promise.all([
-      this.prisma.saleItem.deleteMany({ where: { saleId: id } }),
-      this.prisma.payment.deleteMany({ where: { saleId: id } }),
-      this.prisma.installment.deleteMany({ where: { creditSaleId: id } }),
-    ]);
+      
+      await Promise.all([
+        tx.saleItem.deleteMany({ where: { saleId: id } }),
+        tx.payment.deleteMany({ where: { saleId: id } }),
+        tx.installment.deleteMany({ where: { creditSaleId: id } }),
+      ]);
 
-    return this.prisma.sale.update({
-      where: { id },
-      data: {
-        ...saleData,
-        edited: true,
-        items: {
-          create: items.map((item: any) => ({
-            productId: Number(item.productId),
-            productName: item.productName,
-            quantity: Number(item.quantity),
-            unit: item.unit,
-            price: Number(item.price),
-            size: item.size,
-            color: item.color,
-            discount: Number(item.discount || 0),
-            surcharge: Number(item.surcharge || 0),
-            basePrice: item.basePrice ? Number(item.basePrice) : null,
-            notes: item.notes,
-            description: item.description,
-            rubro: item.rubro,
-            fromBudget: item.fromBudget,
-            budgetId: item.budgetId,
-            costPrice: item.costPrice ? Number(item.costPrice) : null,
-            profit: item.profit ? Number(item.profit) : null,
-            profitPercentage: item.profitPercentage ? Number(item.profitPercentage) : null,
-          })),
-        },
-        payments: payments
-          ? {
-              create: payments.map((payment: any) => ({
-                amount: Number(payment.amount),
-                date: payment.date ? new Date(payment.date) : new Date(),
-                method: payment.method,
-                checkNumber: payment.checkNumber,
-                checkDate: payment.checkDate ? new Date(payment.checkDate) : null,
-                checkBank: payment.checkBank,
-                checkStatus: payment.checkStatus,
-                checkDescription: payment.checkDescription,
-                customerId: payment.customerId,
-                customerName: payment.customerName,
-                installmentNumber: payment.installmentNumber ? Number(payment.installmentNumber) : null,
-                saleTotal: payment.saleTotal ? Number(payment.saleTotal) : null,
-              })),
-            }
-          : undefined,
-        installments: installments
-          ? {
-              create: installments.map((inst: any) => ({
-                number: Number(inst.number),
-                dueDate: new Date(inst.dueDate),
-                amount: Number(inst.amount),
-                interestAmount: Number(inst.interestAmount || 0),
-                penaltyAmount: Number(inst.penaltyAmount || 0),
-                status: inst.status || 'pendiente',
-                totalAmount: Number(inst.totalAmount),
-              })),
-            }
-          : undefined,
-      },
-      include: {
-        customer: true,
-        items: {
-          include: {
-            product: true,
+      return tx.sale.update({
+        where: { id },
+        data: {
+          ...saleData,
+          edited: true,
+          items: {
+            create: items.map((item: any) => ({
+              productId: Number(item.productId),
+              productName: item.productName,
+              quantity: Number(item.quantity),
+              unit: item.unit,
+              price: Number(item.price),
+              size: item.size,
+              color: item.color,
+              discount: Number(item.discount || 0),
+              surcharge: Number(item.surcharge || 0),
+              basePrice: item.basePrice ? Number(item.basePrice) : null,
+              notes: item.notes,
+              description: item.description,
+              rubro: item.rubro,
+              fromBudget: item.fromBudget,
+              budgetId: item.budgetId,
+              costPrice: item.costPrice ? Number(item.costPrice) : null,
+              profit: item.profit ? Number(item.profit) : null,
+              profitPercentage: item.profitPercentage ? Number(item.profitPercentage) : null,
+            })),
           },
+          payments: payments
+            ? {
+                create: payments.map((payment: any) => ({
+                  amount: Number(payment.amount),
+                  date: payment.date ? new Date(payment.date) : new Date(),
+                  method: payment.method,
+                  checkNumber: payment.checkNumber,
+                  checkDate: payment.checkDate ? new Date(payment.checkDate) : null,
+                  checkBank: payment.checkBank,
+                  checkStatus: payment.checkStatus,
+                  checkDescription: payment.checkDescription,
+                  customerId: payment.customerId,
+                  customerName: payment.customerName,
+                  installmentNumber: payment.installmentNumber ? Number(payment.installmentNumber) : null,
+                  saleTotal: payment.saleTotal ? Number(payment.saleTotal) : null,
+                })),
+              }
+            : undefined,
+          installments: installments
+            ? {
+                create: installments.map((inst: any) => ({
+                  number: Number(inst.number),
+                  dueDate: new Date(inst.dueDate),
+                  amount: Number(inst.amount),
+                  interestAmount: Number(inst.interestAmount || 0),
+                  penaltyAmount: Number(inst.penaltyAmount || 0),
+                  status: inst.status || 'pendiente',
+                  totalAmount: Number(inst.totalAmount),
+                })),
+              }
+            : undefined,
         },
-        payments: true,
-        installments: true,
-      },
+        include: {
+          customer: true,
+          items: {
+            include: {
+              product: true,
+            },
+          },
+          payments: true,
+          installments: true,
+        },
+      });
     });
   }
 

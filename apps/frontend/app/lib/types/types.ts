@@ -465,6 +465,7 @@ export type ProductReturn = {
   reason: string;
   date: string;
   stockAdded: number;
+  unit?: Product["unit"];
   amount: number;
   profit: number;
   rubro: Rubro;
@@ -474,7 +475,7 @@ export interface Payment {
   saleId: number;
   amount: number;
   date: string;
-  saleDate: string;
+  saleDate?: string;
   method: PaymentMethod;
   checkNumber?: string;
   checkDate?: string;

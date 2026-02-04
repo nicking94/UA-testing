@@ -3,7 +3,6 @@ import Modal from "@/app/components/Modal";
 import Notification from "@/app/components/Notification";
 import {
   ClothingSizeOption,
-  DailyCashMovement,
   Product,
   ProductReturn,
   Rubro,
@@ -38,11 +37,6 @@ import { usePagination } from "@/app/context/PaginationContext";
 import BarcodeGenerator from "@/app/components/BarcodeGenerator";
 import AdvancedFilterPanel from "@/app/components/AdvancedFilterPanel";
 import Select from "@/app/components/Select";
-import {
-  convertFromBaseUnit,
-  convertToBaseUnit,
-} from "@/app/lib/utils/calculations";
-import { getLocalDateString } from "@/app/lib/utils/getLocalDate";
 import Checkbox from "@/app/components/Checkbox";
 import { toCapitalize } from "@/app/lib/utils/capitalizeText";
 import {
@@ -68,7 +62,6 @@ import { productPricesApi } from "@/app/lib/api/product-prices";
 import { productReturnsApi } from "@/app/lib/api/product-returns";
 import { customCategoriesApi } from "@/app/lib/api/custom-categories";
 import { usePriceListsApi } from "@/app/hooks/usePriceListsApi";
-import { useDailyCashApi } from "@/app/hooks/useDailyCashApi";
 import { suppliersApi } from "@/app/lib/api/suppliers";
 import { supplierProductsApi } from "@/app/lib/api/supplier-products";
 const PRODUCT_CONFIG = {
@@ -1099,14 +1092,13 @@ const ProductsPage = () => {
   } = useProducts(rubro);
   const { validateProduct } = useProductValidation();
   const {
+    showNotification,
+    closeNotification,
     isNotificationOpen,
     notificationMessage,
     notificationType,
-    showNotification,
-    closeNotification,
   } = useNotification();
   const { fetchPriceLists } = usePriceListsApi();
-  const { getByDate, updateDailyCash } = useDailyCashApi();
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
   const [selectedPriceListId, setSelectedPriceListId] = useState<number | null>(
     null
@@ -1163,7 +1155,7 @@ const ProductsPage = () => {
   const [showReturnsHistory, setShowReturnsHistory] = useState(false);
   const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
   const [returnQuantity, setReturnQuantity] = useState<number>(0);
-  const [returnUnit, setReturnUnit] = useState<string>("");
+  const [returnUnit, setReturnUnit] = useState<Product["unit"]>("Unid.");
   const [clothingSizes, setClothingSizes] = useState<ClothingSizeOption[]>([]);
   const [newSize, setNewSize] = useState("");
   const [sizeToDelete, setSizeToDelete] = useState<string | null>(null);
@@ -1253,6 +1245,15 @@ const ProductsPage = () => {
       showNotification("Error al cargar los talles", "error");
     }
   }, [showNotification]);
+
+  const fetchReturns = useCallback(async () => {
+    try {
+      const allReturns = await productReturnsApi.getAll();
+      setReturns(allReturns);
+    } catch (error) {
+      console.error("Error fetching returns:", error);
+    }
+  }, []);
   const handleIvaCheckboxChange = useCallback(
     (hasIvaIncluded: boolean) => {
       let newCostPrice = newProduct.costPrice;
@@ -1391,7 +1392,7 @@ const ProductsPage = () => {
     setSelectedReturnProduct(null);
     setReturnReason("");
     setReturnQuantity(0);
-    setReturnUnit("");
+    setReturnUnit("Unid.");
   }, []);
   const handleReturnProduct = useCallback(async () => {
     if (!selectedReturnProduct) {
@@ -1399,91 +1400,40 @@ const ProductsPage = () => {
       return;
     }
     try {
-      const currentStock = selectedReturnProduct.stock;
       if (returnQuantity <= 0) {
         showNotification("La cantidad debe ser mayor a 0", "error");
         return;
       }
-      const baseQuantity = convertToBaseUnit(returnQuantity, returnUnit);
-      const currentStockInBase = convertToBaseUnit(
-        currentStock,
-        selectedReturnProduct.unit
-      );
-      const today = getLocalDateString();
-      const dailyCash = await getByDate(today);
-      if (!dailyCash) {
-        showNotification("No hay caja abierta para hoy", "error");
-        return;
-      }
-      const amountToSubtract = selectedReturnProduct.price * returnQuantity;
+
+      const amountToRefund = selectedReturnProduct.price * returnQuantity;
       const profitToSubtract =
         (selectedReturnProduct.price - selectedReturnProduct.costPrice) *
         returnQuantity;
-      const returnMovement: DailyCashMovement = {
-        id: Date.now(),
-        amount: amountToSubtract,
-        description: `Devolución: ${getDisplayProductName(
-          selectedReturnProduct,
-          rubro,
-          false
-        )} - ${returnReason.trim() || "Sin motivo"}`,
-        type: "EGRESO",
-        paymentMethod: "EFECTIVO",
-        date: new Date().toISOString(),
-        productId: selectedReturnProduct.id,
-        productName: getDisplayProductName(selectedReturnProduct, rubro, false),
-        costPrice: selectedReturnProduct.costPrice,
-        sellPrice: selectedReturnProduct.price,
-        quantity: returnQuantity,
-        profit: -profitToSubtract,
-        rubro: selectedReturnProduct.rubro || rubro,
-        unit: selectedReturnProduct.unit,
-        createdAt: new Date().toISOString(),
-      };
-      const updatedCash = {
-        ...dailyCash,
-        movements: [...dailyCash.movements, returnMovement],
-        totalExpense: (dailyCash.totalExpense || 0) + amountToSubtract,
-        totalProfit: (dailyCash.totalProfit || 0) - profitToSubtract,
-      };
-      await updateDailyCash(dailyCash.id, updatedCash);
-      const updatedStock = convertFromBaseUnit(
-        currentStockInBase + baseQuantity,
-        selectedReturnProduct.unit
-      );
-      await updateProduct(selectedReturnProduct.id, {
-        stock: parseFloat(updatedStock.toFixed(3)),
-      });
-      const newReturn: ProductReturn = {
-        id: Date.now(),
+
+      const newReturn: Omit<ProductReturn, "id"> = {
         productId: selectedReturnProduct.id,
         productName: getDisplayProductName(selectedReturnProduct, rubro, false),
         reason: returnReason.trim() || "Sin motivo",
         date: new Date().toISOString(),
-        stockAdded: parseFloat(
-          convertFromBaseUnit(baseQuantity, selectedReturnProduct.unit).toFixed(
-            3
-          )
-        ),
-        amount: amountToSubtract,
-        profit: profitToSubtract,
+        stockAdded: returnQuantity,
+        unit: returnUnit || selectedReturnProduct.unit,
+        amount: amountToRefund,
+        profit: -profitToSubtract,
         rubro: selectedReturnProduct.rubro || rubro,
       };
+
       await productReturnsApi.create(newReturn);
-      setReturns((prev) => [...prev, newReturn]);
-      showNotification(
-        `Producto ${getDisplayProductName(
-          selectedReturnProduct
-        )} devuelto correctamente. Stock actualizado: ${updatedStock} ${
-          selectedReturnProduct.unit
-        }. Monto restado: ${formatCurrency(amountToSubtract)}`,
-        "success"
-      );
-      resetReturnData();
+
+      // Refresh data
+      await fetchProducts();
+      await fetchReturns();
+
+      showNotification("Devolución registrada correctamente", "success");
       setIsReturnModalOpen(false);
+      resetReturnData();
     } catch (error) {
-      console.error("Error al devolver producto:", error);
-      showNotification("Error al devolver el producto", "error");
+      console.error("Error al registrar devolución:", error);
+      showNotification("Error al registrar la devolución", "error");
     }
   }, [
     selectedReturnProduct,
@@ -1492,10 +1442,10 @@ const ProductsPage = () => {
     returnUnit,
     rubro,
     updateProduct,
+    fetchProducts,
+    fetchReturns,
     showNotification,
-    getByDate,
     resetReturnData,
-    updateDailyCash,
   ]);
   const handleSort = useCallback(
     (sort: { field: keyof Product; direction: "asc" | "desc" }) => {
