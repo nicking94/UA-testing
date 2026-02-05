@@ -3,6 +3,7 @@ import Modal from "@/app/components/Modal";
 import Notification from "@/app/components/Notification";
 import {
   ClothingSizeOption,
+  DailyCashMovement,
   Product,
   ProductReturn,
   Rubro,
@@ -19,8 +20,16 @@ import {
   QrCode,
   Add,
 } from "@mui/icons-material";
+
 import React, { useEffect, useMemo, useState, useCallback } from "react";
-import { useProductsApi } from "@/app/hooks/useProductsApi";
+import { productsApi } from "@/app/lib/api/products";
+import { priceListsApi } from "@/app/lib/api/price-lists";
+import { productPricesApi } from "@/app/lib/api/product-prices";
+import { customCategoriesApi } from "@/app/lib/api/custom-categories";
+import { dailyCashApi } from "@/app/lib/api/daily-cash";
+import { productReturnsApi } from "@/app/lib/api/product-returns";
+import { suppliersApi } from "@/app/lib/api/suppliers";
+import { supplierProductsApi } from "@/app/lib/api/supplier-products";
 import SearchBar from "@/app/components/SearchBar";
 import { parseISO, format, differenceInDays, startOfDay } from "date-fns";
 import { es } from "date-fns/locale";
@@ -37,6 +46,11 @@ import { usePagination } from "@/app/context/PaginationContext";
 import BarcodeGenerator from "@/app/components/BarcodeGenerator";
 import AdvancedFilterPanel from "@/app/components/AdvancedFilterPanel";
 import Select from "@/app/components/Select";
+import {
+  convertFromBaseUnit,
+  convertToBaseUnit,
+} from "@/app/lib/utils/calculations";
+import { getLocalDateString } from "@/app/lib/utils/getLocalDate";
 import Checkbox from "@/app/components/Checkbox";
 import { toCapitalize } from "@/app/lib/utils/capitalizeText";
 import {
@@ -57,19 +71,14 @@ import Button from "@/app/components/Button";
 import { useNotification } from "@/app/hooks/useNotification";
 import CustomGlobalTooltip from "@/app/components/CustomTooltipGlobal";
 import { runPriceListCleanup } from "@/app/lib/utils/cleanupPriceLists";
-import { productsApi, ProductFilters } from "@/app/lib/api/products";
-import { productPricesApi } from "@/app/lib/api/product-prices";
-import { productReturnsApi } from "@/app/lib/api/product-returns";
-import { customCategoriesApi } from "@/app/lib/api/custom-categories";
-import { usePriceListsApi } from "@/app/hooks/usePriceListsApi";
-import { suppliersApi } from "@/app/lib/api/suppliers";
-import { supplierProductsApi } from "@/app/lib/api/supplier-products";
+
 const PRODUCT_CONFIG = {
   MAX_PRODUCTS_PER_CATEGORY: 30,
   IVA_PERCENTAGE: 21,
   DEFAULT_UNIT: "Unid.",
   NOTIFICATION_DURATION: 2500,
 } as const;
+
 const CONVERSION_FACTORS = {
   Gr: { base: "Kg", factor: 0.001 },
   Kg: { base: "Kg", factor: 1 },
@@ -92,6 +101,7 @@ const CONVERSION_FACTORS = {
   A: { base: "A", factor: 1 },
   W: { base: "W", factor: 1 },
 } as const;
+
 const unitOptions: UnitOption[] = [
   { value: "Unid.", label: "Unidad", convertible: false },
   { value: "Kg", label: "Kilogramo", convertible: true },
@@ -114,6 +124,7 @@ const unitOptions: UnitOption[] = [
   { value: "Caja", label: "Caja", convertible: false },
   { value: "Cajón", label: "Cajón", convertible: false },
 ];
+
 const seasonOptions = [
   { value: "todo el año", label: "Todo el año" },
   { value: "invierno", label: "Invierno" },
@@ -121,18 +132,23 @@ const seasonOptions = [
   { value: "primavera", label: "Primavera" },
   { value: "verano", label: "Verano" },
 ];
+
 const useDebounce = <T,>(value: T, delay: number): T => {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
+
   useEffect(() => {
     const handler = setTimeout(() => {
       setDebouncedValue(value);
     }, delay);
+
     return () => {
       clearTimeout(handler);
     };
   }, [value, delay]);
+
   return debouncedValue;
 };
+
 const getDefaultProduct = (rubro: Rubro): Product => ({
   id: Date.now(),
   name: "",
@@ -157,10 +173,12 @@ const getDefaultProduct = (rubro: Rubro): Product => ({
   setMinStock: false,
   minStock: 0,
 });
+
 const useProductForm = (rubro: Rubro, initialProduct?: Product) => {
   const [formData, setFormData] = useState<Product>(
-    () => initialProduct || getDefaultProduct(rubro)
+    () => initialProduct || getDefaultProduct(rubro),
   );
+
   const updateField = useCallback(
     (
       field: keyof Product,
@@ -169,7 +187,7 @@ const useProductForm = (rubro: Rubro, initialProduct?: Product) => {
         | number
         | boolean
         | { name: string; rubro: Rubro }[]
-        | Product["unit"]
+        | Product["unit"],
     ) => {
       if (field === "customCategory" && typeof value === "string") {
         setFormData((prev) => ({ ...prev, [field]: toCapitalize(value) }));
@@ -177,60 +195,71 @@ const useProductForm = (rubro: Rubro, initialProduct?: Product) => {
         setFormData((prev) => ({ ...prev, [field]: value }));
       }
     },
-    []
+    [],
   );
+
   const resetForm = useCallback(() => {
     setFormData(getDefaultProduct(rubro));
   }, [rubro]);
+
   const setForm = useCallback((product: Product) => {
     setFormData(product);
   }, []);
+
   return { formData, updateField, resetForm, setForm };
 };
-const useProducts = (rubro?: Rubro) => {
-  const {
-    products,
-    loading,
-    fetchProducts: fetchProductsApi,
-    addProduct: addProductApi,
-    updateProduct: updateProductApi,
-    deleteProduct: deleteProductApi,
-    setProducts,
-  } = useProductsApi();
+
+const useProducts = () => {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(false);
+
   const fetchProducts = useCallback(async () => {
+    setLoading(true);
     try {
-      const filters: ProductFilters = {};
-      if (rubro && rubro !== "Todos los rubros") {
-        filters.rubro = rubro === "Todos los rubros" ? undefined : rubro;
-      }
-      const result = await fetchProductsApi(filters);
-      return result.sort((a, b) => b.id - a.id);
+      const storedProducts = await productsApi.getAll();
+      const formattedProducts = storedProducts
+        .map((p: Product) => ({
+          ...p,
+          id: Number(p.id),
+          customCategories: (p.customCategories || []).filter(
+            (cat) => cat.name && cat.name.trim(),
+          ),
+        }))
+        .sort((a, b) => b.id - a.id);
+
+      setProducts(formattedProducts);
+      return formattedProducts;
     } catch (error) {
       console.error("Error fetching products:", error);
       throw error;
+    } finally {
+      setLoading(false);
     }
-  }, [fetchProductsApi, rubro]);
-  const addProduct = useCallback(
-    async (product: Product) => {
-      const { id, ...productWithoutId } = product;
-      void id;
-      const newProduct = await addProductApi(productWithoutId);
-      return newProduct;
-    },
-    [addProductApi]
-  );
+  }, []);
+
+  const addProduct = useCallback(async (product: Product) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { id, ...productWithoutId } = product;
+    const newProduct = await productsApi.create(productWithoutId);
+    setProducts((prev) => [...prev, newProduct]);
+    return newProduct;
+  }, []);
+
   const updateProduct = useCallback(
     async (id: number, updates: Partial<Product>) => {
-      await updateProductApi(id, updates);
+      await productsApi.update(id, updates);
+      setProducts((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, ...updates } : p)),
+      );
     },
-    [updateProductApi]
+    [],
   );
-  const deleteProduct = useCallback(
-    async (id: number) => {
-      await deleteProductApi(id);
-    },
-    [deleteProductApi]
-  );
+
+  const deleteProduct = useCallback(async (id: number) => {
+    await productsApi.delete(id);
+    setProducts((prev) => prev.filter((p) => p.id !== id));
+  }, []);
+
   return {
     products,
     loading,
@@ -241,9 +270,11 @@ const useProducts = (rubro?: Rubro) => {
     setProducts,
   };
 };
+
 const useProductValidation = () => {
   const validateProduct = useCallback((product: Product): string[] => {
     const errors: string[] = [];
+
     if (!product.name?.trim()) errors.push("El nombre es requerido");
     if (product.stock < 0) errors.push("El stock no puede ser negativo");
     if (product.costPrice <= 0)
@@ -257,32 +288,38 @@ const useProductValidation = () => {
     if (!product.customCategories?.length) {
       errors.push("La categoría es requerida");
     }
+
     return errors;
   }, []);
+
   return { validateProduct };
 };
+
 const useSortedProducts = (
   products: Product[],
   filters: UnifiedFilter[],
   sortConfig: { field: keyof Product; direction: "asc" | "desc" },
   rubro: Rubro,
-  searchQuery: string
+  searchQuery: string,
 ) => {
   return useMemo(() => {
     let filtered = [...products];
+
     if (rubro !== "Todos los rubros") {
       filtered = filtered.filter((product) => product.rubro === rubro);
     }
+
     if (searchQuery) {
       filtered = filtered.filter((product) => {
         const productName = getDisplayProductName(
           product,
           rubro,
-          false
+          false,
         ).toLowerCase();
         return productName.includes(searchQuery.toLowerCase());
       });
     }
+
     if (filters.length > 0) {
       filtered = filtered.filter((product) => {
         return filters.every((filter) => {
@@ -290,6 +327,7 @@ const useSortedProducts = (
             filter.field === "customCategories"
               ? product.customCategories?.[0]?.name
               : product[filter.field as keyof Product];
+
           if (fieldValue === undefined || fieldValue === null) return false;
           return (
             String(fieldValue).toLowerCase() ===
@@ -298,25 +336,32 @@ const useSortedProducts = (
         });
       });
     }
+
     filtered.sort((a, b) => {
       const getExpirationStatus = (product: Product) => {
         if (!product.expiration) return 3;
+
         const today = startOfDay(new Date());
         const expDate = startOfDay(parseISO(product.expiration));
         const diffDays = differenceInDays(expDate, today);
+
         if (diffDays < 0) return 0;
         if (diffDays === 0) return 1;
         if (diffDays <= 7) return 2;
         return 3;
       };
+
       const statusA = getExpirationStatus(a);
       const statusB = getExpirationStatus(b);
+
       if (statusA !== statusB) {
         return statusA - statusB;
       }
+
       let compareResult = 0;
       const field = sortConfig.field;
       const direction = sortConfig.direction;
+
       switch (field) {
         case "name":
           compareResult = a.name.localeCompare(b.name);
@@ -342,11 +387,14 @@ const useSortedProducts = (
           const valueB = String(b[field] || "");
           compareResult = valueA.localeCompare(valueB);
       }
+
       return direction === "asc" ? compareResult : -compareResult;
     });
+
     return filtered;
   }, [products, rubro, searchQuery, filters, sortConfig]);
 };
+
 const getRowStyles = (expirationStatus: string, hasLowStock: boolean) => {
   const baseStyles = {
     border: "1px solid",
@@ -358,6 +406,7 @@ const getRowStyles = (expirationStatus: string, hasLowStock: boolean) => {
     },
     transition: "all 0.3s ease-in-out",
   };
+
   switch (expirationStatus) {
     case "expired":
       return {
@@ -415,6 +464,7 @@ const getRowStyles = (expirationStatus: string, hasLowStock: boolean) => {
         : baseStyles;
   }
 };
+
 interface ProductRowProps {
   product: Product;
   rubro: Rubro;
@@ -425,6 +475,7 @@ interface ProductRowProps {
   currentPriceListId?: number | null;
   productPrices: Record<number, number>;
 }
+
 const ProductRow = React.memo(
   ({
     product,
@@ -438,35 +489,41 @@ const ProductRow = React.memo(
   }: ProductRowProps) => {
     const displayName = useMemo(
       () => getDisplayProductName(product, rubro, false),
-      [product, rubro]
+      [product, rubro],
     );
+
     const { expirationDate, expirationStatus } = useMemo(() => {
       const expDate = product.expiration
         ? startOfDay(parseISO(product.expiration))
         : null;
       const today = startOfDay(new Date());
       const daysUntilExp = expDate ? differenceInDays(expDate, today) : null;
+
       let status = "normal";
       if (daysUntilExp !== null) {
         if (daysUntilExp < 0) status = "expired";
         else if (daysUntilExp === 0) status = "expiresToday";
         else if (daysUntilExp <= 7) status = "expiringSoon";
       }
+
       return { expirationDate: expDate, expirationStatus: status };
     }, [product.expiration]);
+
     const hasLowStock = useMemo(
       () =>
         Boolean(
           product.setMinStock &&
-            product.minStock &&
-            product.stock < product.minStock
+          product.minStock &&
+          product.stock < product.minStock,
         ),
-      [product.setMinStock, product.minStock, product.stock]
+      [product.setMinStock, product.minStock, product.stock],
     );
+
     const rowStyles = useMemo(
       () => getRowStyles(expirationStatus, hasLowStock),
-      [expirationStatus, hasLowStock]
+      [expirationStatus, hasLowStock],
     );
+
     const stockCellStyles = useMemo(
       () => ({
         textAlign: "center" as const,
@@ -480,23 +537,29 @@ const ProductRow = React.memo(
             : {}
           : { color: "error.main" }),
       }),
-      [product.stock, hasLowStock]
+      [product.stock, hasLowStock],
     );
+
+    // Obtener el precio según la lista de precios
     const productPrice = useMemo(() => {
       if (currentPriceListId && productPrices[product.id] !== undefined) {
         return productPrices[product.id];
       }
       return product.price;
     }, [product.id, product.price, currentPriceListId, productPrices]);
+
     const handleEdit = useCallback(() => {
       onEdit(product);
     }, [onEdit, product]);
+
     const handleDelete = useCallback(() => {
       onDelete(product);
     }, [onDelete, product]);
+
     const handleGenerateBarcode = useCallback(() => {
       onGenerateBarcode(product);
     }, [onGenerateBarcode, product]);
+
     return (
       <TableRow sx={rowStyles}>
         <TableCell
@@ -523,8 +586,8 @@ const ProductRow = React.memo(
                     expirationStatus === "expiresToday"
                       ? "warning.main"
                       : expirationStatus === "expiringSoon"
-                      ? "warning.dark"
-                      : "error.main",
+                        ? "warning.dark"
+                        : "error.main",
                 }}
                 fontSize="small"
               />
@@ -561,6 +624,7 @@ const ProductRow = React.memo(
         <TableCell sx={{ textAlign: "center" }}>
           {product.location || "-"}
         </TableCell>
+
         {rubro === "indumentaria" && (
           <>
             <TableCell sx={{ textAlign: "center" }}>
@@ -581,6 +645,7 @@ const ProductRow = React.memo(
         <TableCell sx={{ textAlign: "center", textTransform: "capitalize" }}>
           {product.season || "-"}
         </TableCell>
+
         <TableCell sx={{ textAlign: "center" }}>
           {formatCurrency(product.costPrice)}
         </TableCell>
@@ -683,9 +748,11 @@ const ProductRow = React.memo(
         )}
       </TableRow>
     );
-  }
+  },
 );
+
 ProductRow.displayName = "ProductRow";
+
 interface ProductFormProps {
   formData: Product;
   onFieldChange: (
@@ -695,7 +762,7 @@ interface ProductFormProps {
       | number
       | boolean
       | { name: string; rubro: Rubro }[]
-      | Product["unit"]
+      | Product["unit"],
   ) => void;
   rubro: Rubro;
   editingProduct: Product | null;
@@ -715,6 +782,7 @@ interface ProductFormProps {
   onSizeBlur: () => void;
   onCategoryDelete: (category: { name: string; rubro: Rubro }) => void;
 }
+
 const ProductForm = React.memo(
   ({
     formData,
@@ -727,6 +795,7 @@ const ProductForm = React.memo(
     onGenerateAutoBarcode,
     unitOptions,
     seasonOptions,
+
     newBrand,
     newColor,
     newSize,
@@ -738,14 +807,67 @@ const ProductForm = React.memo(
   }: ProductFormProps) => {
     const selectedUnit = useMemo(
       () => unitOptions.find((opt) => opt.value === formData.unit) ?? null,
-      [formData.unit, unitOptions]
+      [formData.unit, unitOptions],
     );
+
+    const [profitPercentage, setProfitPercentage] = useState<string | number>(
+      "",
+    );
+
+    useEffect(() => {
+      if (formData.costPrice > 0 && formData.price > 0) {
+        const margin =
+          ((formData.price - formData.costPrice) / formData.costPrice) * 100;
+        setProfitPercentage(parseFloat(margin.toFixed(2)));
+      } else if (formData.costPrice === 0 && formData.price === 0) {
+        setProfitPercentage("");
+      }
+    }, [formData.costPrice, formData.price]);
+
+    const handlePercentageChange = useCallback(
+      (value: string | number) => {
+        const numericValue = value === "" ? "" : Number(value);
+        setProfitPercentage(numericValue);
+
+        if (
+          formData.costPrice > 0 &&
+          numericValue !== "" &&
+          !isNaN(Number(numericValue))
+        ) {
+          const newPrice =
+            formData.costPrice * (1 + Number(numericValue) / 100);
+          onFieldChange("price", parseFloat(newPrice.toFixed(2)));
+        }
+      },
+      [formData.costPrice, onFieldChange],
+    );
+
+    const handleCostChange = useCallback(
+      (value: number) => {
+        onFieldChange("costPrice", value);
+        // If we have a profit percentage set, update the price to maintain it
+        if (profitPercentage !== "" && !isNaN(Number(profitPercentage))) {
+          const newPrice = value * (1 + Number(profitPercentage) / 100);
+          onFieldChange("price", parseFloat(newPrice.toFixed(2)));
+        }
+      },
+      [onFieldChange, profitPercentage],
+    );
+
+    const handlePriceChange = useCallback(
+      (value: number) => {
+        onFieldChange("price", value);
+        // Profit percentage will be updated by the useEffect
+      },
+      [onFieldChange],
+    );
+
     return (
       <form
         className="flex flex-col gap-4 overflow-y-auto"
         onSubmit={(e) => e.preventDefault()}
       >
-        {}
+        {/* Sección 1: Información Básica */}
         <div className=" space-y-4">
           <div className="flex items-center gap-3">
             <div className="w-1 h-6 bg-blue_m rounded-full"></div>
@@ -753,8 +875,9 @@ const ProductForm = React.memo(
               Información Básica
             </h3>
           </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {}
+            {/* Nombre del Producto */}
             <div className="space-y-2 lg:col-span-2">
               <Input
                 label="Nombre del Producto"
@@ -764,7 +887,8 @@ const ProductForm = React.memo(
                 required
               />
             </div>
-            {}
+
+            {/* Código de Barras */}
             <div className="space-y-2">
               <label className="block text-sm font-medium text-gray_m dark:text-gray_xl">
                 Código de Barras
@@ -778,7 +902,8 @@ const ProductForm = React.memo(
                 buttonTitle="Generar código de barras"
               />
             </div>
-            {}
+
+            {/* Lote */}
             <div className="flex items-end space-y-2">
               <Input
                 label="Lote/Número de Serie"
@@ -789,7 +914,8 @@ const ProductForm = React.memo(
             </div>
           </div>
         </div>
-        {}
+
+        {/* Sección 2: Categorización */}
         <div className="space-y-4">
           <div className="flex items-center gap-3">
             <div className="w-1 h-6 bg-blue_m rounded-full"></div>
@@ -797,8 +923,10 @@ const ProductForm = React.memo(
               Categorización
             </h3>
           </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {}
+            {/* Categoría */}
+
             <div className="space-y-2">
               <label className="block text-sm font-medium text-gray_m dark:text-gray_xl">
                 Categoría <span className="text-red-500">*</span>
@@ -813,7 +941,7 @@ const ProductForm = React.memo(
                   ...globalCustomCategories
                     .filter(
                       (cat) =>
-                        cat.rubro === rubro || cat.rubro === "Todos los rubros"
+                        cat.rubro === rubro || cat.rubro === "Todos los rubros",
                     )
                     .map((cat) => ({
                       value: cat.name,
@@ -825,16 +953,16 @@ const ProductForm = React.memo(
                 value={formData.customCategories?.[0]?.name || ""}
                 onChange={(value) => {
                   const selectedCategory = globalCustomCategories.find(
-                    (cat) => cat.name === value
+                    (cat) => cat.name === value,
                   );
                   onFieldChange(
                     "customCategories",
-                    selectedCategory ? [selectedCategory] : []
+                    selectedCategory ? [selectedCategory] : [],
                   );
                 }}
                 onDeleteOption={(option) => {
                   onCategoryDelete(
-                    option.metadata as { name: string; rubro: Rubro }
+                    option.metadata as { name: string; rubro: Rubro },
                   );
                 }}
                 showDeleteButton={true}
@@ -842,7 +970,8 @@ const ProductForm = React.memo(
                 size="small"
               />
             </div>
-            {}
+
+            {/* Nueva Categoría */}
             {editingProduct ? (
               <div className=" flex items-end space-y-2">
                 <div className="w-full bg-white dark:bg-gray_b p-2.5 rounded-lg border border-blue_l">
@@ -871,7 +1000,8 @@ const ProductForm = React.memo(
             )}
           </div>
         </div>
-        {}
+
+        {/* Sección 3: Precios y Stock */}
         <div className="space-y-4">
           <div className="flex items-center gap-3">
             <div className="w-1 h-6 bg-blue_m rounded-full"></div>
@@ -879,24 +1009,38 @@ const ProductForm = React.memo(
               Precios y Stock
             </h3>
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {}
+
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+            {/* Precio de Costo */}
             <div className="space-y-2">
               <InputCash
                 label="Precio de Costo"
                 value={formData.costPrice}
-                onChange={(value) => onFieldChange("costPrice", value)}
+                onChange={handleCostChange}
               />
             </div>
-            {}
+
+            {/* Porcentaje de Ganancia */}
+            <div className="flex items-end space-y-2">
+              <Input
+                label="Porcentaje de Ganancia %"
+                value={profitPercentage}
+                onChange={handlePercentageChange}
+                placeholder="Ej: 30"
+                type="number"
+              />
+            </div>
+
+            {/* Precio de Venta */}
             <div className="space-y-2">
               <InputCash
                 label="Precio de Venta"
                 value={formData.price}
-                onChange={(value) => onFieldChange("price", value)}
+                onChange={handlePriceChange}
               />
             </div>
-            {}
+
+            {/* Stock Actual */}
             <div className="flex items-end space-y-2">
               <Input
                 label="Stock Actual"
@@ -906,9 +1050,10 @@ const ProductForm = React.memo(
               />
             </div>
           </div>
-          {}
+
+          {/* Configuración de IVA y Stock Mínimo */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {}
+            {/* Configuración de IVA */}
             <div className="space-y-2">
               <div className="bg-gray-50 dark:bg-gray_b p-4 rounded-lg border border-gray-200">
                 <Checkbox
@@ -918,7 +1063,8 @@ const ProductForm = React.memo(
                 />
               </div>
             </div>
-            {}
+
+            {/* Stock Mínimo */}
             <div className="space-y-2">
               <div className="bg-gray_xxl dark:bg-gray_b p-4 rounded-lg border border-gray_xxl">
                 <div className="flex items-center justify-between">
@@ -929,7 +1075,7 @@ const ProductForm = React.memo(
                       onFieldChange("setMinStock", checked);
                       onFieldChange(
                         "minStock",
-                        checked ? formData.minStock || 1 : 0
+                        checked ? formData.minStock || 1 : 0,
                       );
                     }}
                   />
@@ -948,7 +1094,8 @@ const ProductForm = React.memo(
             </div>
           </div>
         </div>
-        {}
+
+        {/* Sección 4: Configuración Adicional */}
         <div className="space-y-4">
           <div className="flex items-center gap-3">
             <div className="w-1 h-6 bg-blue_m rounded-full"></div>
@@ -956,8 +1103,9 @@ const ProductForm = React.memo(
               Configuración Adicional
             </h3>
           </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {}
+            {/* Unidad de Medida */}
             <div className="space-y-2">
               <label className="block text-sm font-medium text-gray_m dark:text-gray_xl">
                 Unidad de Medida <span className="text-red-500">*</span>
@@ -968,7 +1116,7 @@ const ProductForm = React.memo(
                 onChange={(event, selectedOption) => {
                   onFieldChange(
                     "unit",
-                    selectedOption?.value as Product["unit"]
+                    selectedOption?.value as Product["unit"],
                   );
                 }}
                 renderInput={(params) => (
@@ -980,7 +1128,8 @@ const ProductForm = React.memo(
                 )}
               />
             </div>
-            {}
+
+            {/* Ubicación */}
             <div className=" flex items-end space-y-2">
               <Input
                 label="Ubicación en Almacén"
@@ -991,7 +1140,8 @@ const ProductForm = React.memo(
                 placeholder="Ej: Estante A-2"
               />
             </div>
-            {}
+
+            {/* Temporada */}
             <div className="space-y-2">
               <label className="block text-sm font-medium text-gray_m dark:text-gray_xl">
                 Temporada
@@ -1016,7 +1166,8 @@ const ProductForm = React.memo(
               />
             </div>
           </div>
-          {}
+
+          {/* Fecha de Vencimiento */}
           {rubro !== "indumentaria" && (
             <div className="space-y-2">
               <label className="block text-sm font-medium text-gray_m dark:text-gray_xl">
@@ -1032,7 +1183,8 @@ const ProductForm = React.memo(
             </div>
           )}
         </div>
-        {}
+
+        {/* Sección 5: Especificaciones de Indumentaria */}
         {rubro === "indumentaria" && (
           <div className="space-y-4">
             <div className="flex items-center gap-3">
@@ -1041,8 +1193,9 @@ const ProductForm = React.memo(
                 Especificaciones de Indumentaria
               </h3>
             </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              {}
+              {/* Talle */}
               <div className="space-y-2">
                 <Input
                   label="Talle/Medida"
@@ -1052,7 +1205,8 @@ const ProductForm = React.memo(
                   placeholder="Crear nuevo talle"
                 />
               </div>
-              {}
+
+              {/* Color */}
               <div className="space-y-2">
                 <Input
                   label="Color"
@@ -1061,7 +1215,8 @@ const ProductForm = React.memo(
                   placeholder="Crear nuevo color"
                 />
               </div>
-              {}
+
+              {/* Marca */}
               <div className="space-y-2">
                 <Input
                   label="Marca"
@@ -1075,12 +1230,15 @@ const ProductForm = React.memo(
         )}
       </form>
     );
-  }
+  },
 );
+
 ProductForm.displayName = "ProductForm";
+
 const ProductsPage = () => {
   const { rubro } = useRubro();
   const { currentPage, itemsPerPage } = usePagination();
+
   const {
     products,
     loading,
@@ -1089,23 +1247,25 @@ const ProductsPage = () => {
     updateProduct,
     deleteProduct,
     setProducts,
-  } = useProducts(rubro);
+  } = useProducts();
   const { validateProduct } = useProductValidation();
   const {
-    showNotification,
-    closeNotification,
     isNotificationOpen,
     notificationMessage,
     notificationType,
+    showNotification,
+    closeNotification,
   } = useNotification();
-  const { fetchPriceLists } = usePriceListsApi();
+
+  // Estados para listas de precios
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
   const [selectedPriceListId, setSelectedPriceListId] = useState<number | null>(
-    null
+    null,
   );
   const [productPrices, setProductPrices] = useState<Record<number, number>>(
-    {}
+    {},
   );
+
   const [isOpenModal, setIsOpenModal] = useState(false);
   const {
     formData: newProduct,
@@ -1120,6 +1280,7 @@ const ProductsPage = () => {
     field: "name",
     direction: "asc",
   });
+
   const [filters, setFilters] = useState<UnifiedFilter[]>([]);
   const [globalCustomCategories, setGlobalCustomCategories] = useState<
     Array<{ name: string; rubro: Rubro }>
@@ -1155,36 +1316,48 @@ const ProductsPage = () => {
   const [showReturnsHistory, setShowReturnsHistory] = useState(false);
   const [isSelectionModalOpen, setIsSelectionModalOpen] = useState(false);
   const [returnQuantity, setReturnQuantity] = useState<number>(0);
-  const [returnUnit, setReturnUnit] = useState<Product["unit"]>("Unid.");
+  const [returnUnit, setReturnUnit] = useState<string>("");
   const [clothingSizes, setClothingSizes] = useState<ClothingSizeOption[]>([]);
   const [newSize, setNewSize] = useState("");
   const [sizeToDelete, setSizeToDelete] = useState<string | null>(null);
   const [isSizeDeleteModalOpen, setIsSizeDeleteModalOpen] = useState(false);
+
+  // En el useEffect que carga las listas de precios, reemplázalo con:
   useEffect(() => {
     const loadPriceLists = async () => {
       if (rubro === "Todos los rubros") return;
       try {
+        // Primero ejecutar la limpieza
         await runPriceListCleanup();
-        const allLists = await fetchPriceLists();
-        const lists = allLists.filter((list) => 
-          list.rubro === rubro && 
-          list.isActive !== false
+
+        // Luego cargar las listas filtrando duplicados
+        // Luego cargar las listas filtrando duplicados
+        const allLists = await priceListsApi.getAll();
+        const lists = allLists.filter(
+          (list) => list.rubro === rubro && list.isActive !== false,
         );
+
+        // Filtrar duplicados por nombre (case-insensitive)
         const uniqueLists = Array.from(
           new Map(
-            lists.map((list: PriceList) => {
+            lists.map((list) => {
               const key = `${list.name.toLowerCase().trim()}_${list.rubro}_${
                 list.isDefault
               }`;
               return [key, list];
-            })
-          ).values()
+            }),
+          ).values(),
         ).sort((a, b) => {
+          // Primero las listas por defecto
           if (a.isDefault && !b.isDefault) return -1;
           if (!a.isDefault && b.isDefault) return 1;
+          // Luego por nombre
           return a.name.localeCompare(b.name);
         });
+
         setPriceLists(uniqueLists);
+
+        // Seleccionar lista por defecto o primera disponible
         const defaultList = uniqueLists.find((list) => list.isDefault);
         if (defaultList) {
           setSelectedPriceListId(defaultList.id);
@@ -1195,50 +1368,63 @@ const ProductsPage = () => {
         console.error("Error loading price lists:", error);
       }
     };
+
     loadPriceLists();
-  }, [rubro, fetchPriceLists]);
+  }, [rubro]);
+
+  // Cargar precios de productos para la lista seleccionada
   useEffect(() => {
     const loadProductPrices = async () => {
       if (!selectedPriceListId) return;
+
       try {
         const prices = await productPricesApi.getAll({
           priceListId: selectedPriceListId,
         });
+
         const priceMap: Record<number, number> = {};
         prices.forEach((price) => {
           priceMap[price.productId] = price.price;
         });
+
         setProductPrices(priceMap);
       } catch (error) {
         console.error("Error loading product prices:", error);
       }
     };
+
     loadProductPrices();
   }, [selectedPriceListId]);
+
   const calculatePriceWithIva = useCallback((price: number): number => {
     return price * (1 + PRODUCT_CONFIG.IVA_PERCENTAGE / 100);
   }, []);
+
   const calculatePriceWithoutIva = useCallback(
     (priceWithIva: number): number => {
       return priceWithIva / (1 + PRODUCT_CONFIG.IVA_PERCENTAGE / 100);
     },
-    []
+    [],
   );
+
   const loadClothingSizes = useCallback(async () => {
     try {
       const clothingProducts = await productsApi.getAll({
-        rubro: "indumentaria"
+        rubro: "indumentaria",
       });
+
       const uniqueSizes = Array.from(
         new Set(
           clothingProducts
             .filter((product) => product.size && product.size.trim() !== "")
-            .map((product) => product.size as string)
-        )
+            .map((product) => product.size as string),
+        ),
       );
+
       const sizeOptions = uniqueSizes
         .map((size) => ({ value: size, label: size }))
         .sort((a, b) => a.label.localeCompare(b.label));
+
       setClothingSizes(sizeOptions);
     } catch (error) {
       console.error("Error al cargar talles:", error);
@@ -1246,19 +1432,13 @@ const ProductsPage = () => {
     }
   }, [showNotification]);
 
-  const fetchReturns = useCallback(async () => {
-    try {
-      const allReturns = await productReturnsApi.getAll();
-      setReturns(allReturns);
-    } catch (error) {
-      console.error("Error fetching returns:", error);
-    }
-  }, []);
   const handleIvaCheckboxChange = useCallback(
     (hasIvaIncluded: boolean) => {
       let newCostPrice = newProduct.costPrice;
       let newPrice = newProduct.price;
+
       const currentHasIvaIncluded = newProduct.hasIvaIncluded ?? true;
+
       if (hasIvaIncluded && !currentHasIvaIncluded) {
         newCostPrice = calculatePriceWithIva(newProduct.costPrice);
         newPrice = calculatePriceWithIva(newProduct.price);
@@ -1266,6 +1446,7 @@ const ProductsPage = () => {
         newCostPrice = calculatePriceWithoutIva(newProduct.costPrice);
         newPrice = calculatePriceWithoutIva(newProduct.price);
       }
+
       updateField("hasIvaIncluded", hasIvaIncluded);
       updateField("costPrice", newCostPrice);
       updateField("price", newPrice);
@@ -1277,13 +1458,15 @@ const ProductsPage = () => {
       calculatePriceWithIva,
       calculatePriceWithoutIva,
       updateField,
-    ]
+    ],
   );
+
   const loadCustomCategories = useCallback(async () => {
     try {
       const storedCategories = await customCategoriesApi.getAll();
       const allProducts = await productsApi.getAll();
       const allCategories = new Map<string, { name: string; rubro: Rubro }>();
+
       storedCategories.forEach((cat) => {
         if (cat.name?.trim()) {
           const key = `${cat.name.toLowerCase().trim()}_${cat.rubro}`;
@@ -1293,6 +1476,7 @@ const ProductsPage = () => {
           });
         }
       });
+
       allProducts.forEach((product: Product) => {
         if (product.customCategories?.length) {
           product.customCategories.forEach((cat) => {
@@ -1309,6 +1493,7 @@ const ProductsPage = () => {
             }
           });
         }
+
         if (product.category?.trim()) {
           const key = `${product.category.toLowerCase().trim()}_${
             product.rubro || "comercio"
@@ -1321,19 +1506,22 @@ const ProductsPage = () => {
           }
         }
       });
+
       return Array.from(allCategories.values()).sort((a, b) =>
-        a.name.localeCompare(b.name)
+        a.name.localeCompare(b.name),
       );
     } catch (error) {
       console.error("Error loading categories:", error);
       return [];
     }
   }, []);
+
   const getCompatibleUnits = useCallback(
     (productUnit: string): UnitOption[] => {
       const productUnitInfo =
         CONVERSION_FACTORS[productUnit as keyof typeof CONVERSION_FACTORS];
       if (!productUnitInfo) return unitOptions.filter((u) => !u.convertible);
+
       return unitOptions.filter((option) => {
         if (!option.convertible) return false;
         const optionInfo =
@@ -1341,25 +1529,31 @@ const ProductsPage = () => {
         return optionInfo?.base === productUnitInfo.base;
       });
     },
-    []
+    [],
   );
+
   const calculateEAN13CheckDigit = useCallback((code: string): number => {
     let sum = 0;
+
     for (let i = 0; i < 12; i++) {
       const digit = parseInt(code[i]);
       sum += i % 2 === 0 ? digit : digit * 3;
     }
+
     const remainder = sum % 10;
     return remainder === 0 ? 0 : 10 - remainder;
   }, []);
+
   const generateValidEAN13 = useCallback((): string => {
     let baseCode = "";
     for (let i = 0; i < 12; i++) {
       baseCode += Math.floor(Math.random() * 10).toString();
     }
+
     const checkDigit = calculateEAN13CheckDigit(baseCode);
     return baseCode + checkDigit.toString();
   }, [calculateEAN13CheckDigit]);
+
   const hasChanges = useCallback(
     (originalProduct: Product, updatedProduct: Product) => {
       return (
@@ -1386,54 +1580,116 @@ const ProductsPage = () => {
         originalProduct.season !== updatedProduct.season
       );
     },
-    [rubro]
+    [rubro],
   );
-  const resetReturnData = useCallback(() => {
-    setSelectedReturnProduct(null);
-    setReturnReason("");
-    setReturnQuantity(0);
-    setReturnUnit("Unid.");
-  }, []);
+
   const handleReturnProduct = useCallback(async () => {
     if (!selectedReturnProduct) {
       showNotification("Por favor seleccione un producto", "error");
       return;
     }
+
     try {
+      const currentStock = selectedReturnProduct.stock;
+
       if (returnQuantity <= 0) {
         showNotification("La cantidad debe ser mayor a 0", "error");
         return;
       }
 
-      const amountToRefund = selectedReturnProduct.price * returnQuantity;
+      const baseQuantity = convertToBaseUnit(returnQuantity, returnUnit);
+      const currentStockInBase = convertToBaseUnit(
+        currentStock,
+        selectedReturnProduct.unit,
+      );
+
+      const today = getLocalDateString();
+      const dailyCash = await dailyCashApi.getByDate(today);
+
+      if (!dailyCash) {
+        showNotification("No hay caja abierta para hoy", "error");
+        return;
+      }
+
+      const amountToSubtract = selectedReturnProduct.price * returnQuantity;
       const profitToSubtract =
         (selectedReturnProduct.price - selectedReturnProduct.costPrice) *
         returnQuantity;
 
-      const newReturn: Omit<ProductReturn, "id"> = {
+      const returnMovement: DailyCashMovement = {
+        id: Date.now(),
+        amount: amountToSubtract,
+        description: `Devolución: ${getDisplayProductName(
+          selectedReturnProduct,
+          rubro,
+          false,
+        )} - ${returnReason.trim() || "Sin motivo"}`,
+        type: "EGRESO",
+        paymentMethod: "EFECTIVO",
+        date: new Date().toISOString(),
+        productId: selectedReturnProduct.id,
+        productName: getDisplayProductName(selectedReturnProduct, rubro, false),
+        costPrice: selectedReturnProduct.costPrice,
+        sellPrice: selectedReturnProduct.price,
+        quantity: returnQuantity,
+        profit: -profitToSubtract,
+        rubro: selectedReturnProduct.rubro || rubro,
+        unit: selectedReturnProduct.unit,
+        createdAt: new Date().toISOString(),
+      };
+
+      const updatedCash = {
+        ...dailyCash,
+        movements: [...dailyCash.movements, returnMovement],
+        totalExpense: (dailyCash.totalExpense || 0) + amountToSubtract,
+        totalProfit: (dailyCash.totalProfit || 0) - profitToSubtract,
+      };
+
+      await dailyCashApi.update(dailyCash.id, updatedCash);
+
+      const updatedStock = convertFromBaseUnit(
+        currentStockInBase + baseQuantity,
+        selectedReturnProduct.unit,
+      );
+      await updateProduct(selectedReturnProduct.id, {
+        stock: parseFloat(updatedStock.toFixed(3)),
+      });
+
+      const newReturn: ProductReturn = {
+        id: Date.now(),
         productId: selectedReturnProduct.id,
         productName: getDisplayProductName(selectedReturnProduct, rubro, false),
         reason: returnReason.trim() || "Sin motivo",
         date: new Date().toISOString(),
-        stockAdded: returnQuantity,
-        unit: returnUnit || selectedReturnProduct.unit,
-        amount: amountToRefund,
-        profit: -profitToSubtract,
+        stockAdded: parseFloat(
+          convertFromBaseUnit(baseQuantity, selectedReturnProduct.unit).toFixed(
+            3,
+          ),
+        ),
+        amount: amountToSubtract,
+        profit: profitToSubtract,
         rubro: selectedReturnProduct.rubro || rubro,
       };
 
-      await productReturnsApi.create(newReturn);
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { id: _, ...returnToSave } = newReturn;
+      await productReturnsApi.create(returnToSave);
+      setReturns((prev) => [...prev, newReturn]);
 
-      // Refresh data
-      await fetchProducts();
-      await fetchReturns();
+      showNotification(
+        `Producto ${getDisplayProductName(
+          selectedReturnProduct,
+        )} devuelto correctamente. Stock actualizado: ${updatedStock} ${
+          selectedReturnProduct.unit
+        }. Monto restado: ${formatCurrency(amountToSubtract)}`,
+        "success",
+      );
 
-      showNotification("Devolución registrada correctamente", "success");
-      setIsReturnModalOpen(false);
       resetReturnData();
+      setIsReturnModalOpen(false);
     } catch (error) {
-      console.error("Error al registrar devolución:", error);
-      showNotification("Error al registrar la devolución", "error");
+      console.error("Error al devolver producto:", error);
+      showNotification("Error al devolver el producto", "error");
     }
   }, [
     selectedReturnProduct,
@@ -1442,23 +1698,30 @@ const ProductsPage = () => {
     returnUnit,
     rubro,
     updateProduct,
-    fetchProducts,
-    fetchReturns,
     showNotification,
-    resetReturnData,
   ]);
+
+  const resetReturnData = useCallback(() => {
+    setSelectedReturnProduct(null);
+    setReturnReason("");
+    setReturnQuantity(0);
+    setReturnUnit("");
+  }, []);
+
   const handleSort = useCallback(
     (sort: { field: keyof Product; direction: "asc" | "desc" }) => {
       setSortConfig(sort);
     },
-    []
+    [],
   );
+
   const handleSizeInputBlur = useCallback(() => {
     if (newSize.trim() && newSize !== newProduct.size) {
       updateField("size", newSize.trim());
+
       if (
         !clothingSizes.some(
-          (size) => size.value.toLowerCase() === newSize.toLowerCase().trim()
+          (size) => size.value.toLowerCase() === newSize.toLowerCase().trim(),
         )
       ) {
         const newSizeOption = {
@@ -1467,37 +1730,44 @@ const ProductsPage = () => {
         };
         setClothingSizes((prev) =>
           [...prev, newSizeOption].sort((a, b) =>
-            a.label.localeCompare(b.label)
-          )
+            a.label.localeCompare(b.label),
+          ),
         );
       }
     }
   }, [newSize, newProduct.size, clothingSizes, updateField]);
+
   const handleDeleteCategoryClick = useCallback(
     async (category: { name: string; rubro: Rubro }) => {
       if (!category.name.trim()) return;
+
       setCategoryToDelete(category);
       setIsCategoryDeleteModalOpen(true);
     },
-    []
+    [],
   );
+
   const handleConfirmDeleteSize = useCallback(async () => {
     if (!sizeToDelete) return;
+
     try {
-      const allProducts = await productsApi.getAll({ rubro: "indumentaria" });
-      const productsWithSize = allProducts.filter(
-        (product) => product.size === sizeToDelete
-      );
-      if (productsWithSize.length > 0) {
+      const products = await productsApi.getAll({ rubro: "indumentaria" });
+      const productsWithSize = products.filter(
+        (product) => product.size === sizeToDelete,
+      ).length;
+
+      if (productsWithSize > 0) {
         showNotification(
-          `No se puede eliminar el talle porque ${productsWithSize.length} producto(s) lo están usando`,
-          "error"
+          `No se puede eliminar el talle porque ${productsWithSize} producto(s) lo están usando`,
+          "error",
         );
         return;
       }
+
       setClothingSizes((prev) =>
-        prev.filter((size) => size.value !== sizeToDelete)
+        prev.filter((size) => size.value !== sizeToDelete),
       );
+
       showNotification("Talle eliminado correctamente", "success");
     } catch (error) {
       console.error("Error al eliminar talle:", error);
@@ -1507,23 +1777,34 @@ const ProductsPage = () => {
       setSizeToDelete(null);
     }
   }, [sizeToDelete, showNotification]);
+
   const handleConfirmDeleteCategory = useCallback(
     async (e?: React.MouseEvent) => {
       if (e) e.preventDefault();
       if (!categoryToDelete) return;
+
       try {
-        const categories = await customCategoriesApi.getAll({ rubro: categoryToDelete.rubro });
-        const category = categories.find(cat => cat.name.toLowerCase() === categoryToDelete.name.toLowerCase());
-        if (category?.id) {
-          await customCategoriesApi.delete(category.id);
+        const categories = await customCategoriesApi.getAll({
+          rubro: categoryToDelete.rubro,
+        });
+        const categoryToDeleteRecord = categories.find(
+          (c) => c.name.toLowerCase() === categoryToDelete.name.toLowerCase(),
+        );
+
+        const categoryId = categoryToDeleteRecord?.id;
+        if (categoryId !== undefined) {
+          await customCategoriesApi.delete(categoryId);
         }
+
         const allProducts = await productsApi.getAll();
+
         const updatePromises = allProducts.map(async (product: Product) => {
           const updatedCategories = (product.customCategories || []).filter(
             (cat) =>
               cat.name.toLowerCase() !== categoryToDelete.name.toLowerCase() ||
-              cat.rubro !== categoryToDelete.rubro
+              cat.rubro !== categoryToDelete.rubro,
           );
+
           if (
             updatedCategories.length !== (product.customCategories?.length || 0)
           ) {
@@ -1537,26 +1818,31 @@ const ProductsPage = () => {
           }
           return product;
         });
+
         const updatedProducts = await Promise.all(updatePromises);
+
         setProducts(updatedProducts);
+
         setGlobalCustomCategories((prev) =>
           prev.filter(
             (cat) =>
               cat.name.toLowerCase() !== categoryToDelete.name.toLowerCase() ||
-              cat.rubro !== categoryToDelete.rubro
-          )
+              cat.rubro !== categoryToDelete.rubro,
+          ),
         );
+
         updateField(
           "customCategories",
           (newProduct.customCategories || []).filter(
             (cat) =>
               cat.name.toLowerCase() !== categoryToDelete.name.toLowerCase() ||
-              cat.rubro !== categoryToDelete.rubro
-          )
+              cat.rubro !== categoryToDelete.rubro,
+          ),
         );
+
         showNotification(
           `Categoría "${categoryToDelete.name}" eliminada correctamente`,
-          "success"
+          "success",
         );
       } catch (error) {
         console.error("Error al eliminar categoría:", error);
@@ -1572,19 +1858,23 @@ const ProductsPage = () => {
       setProducts,
       newProduct.customCategories,
       updateField,
-    ]
+    ],
   );
+
   const handleSearch = useCallback((query: string) => {
     setSearchQuery(query.toLowerCase());
   }, []);
+
   const generateAutoBarcode = useCallback(() => {
     const ean13Code = generateValidEAN13();
     updateField("barcode", ean13Code);
   }, [generateValidEAN13, updateField]);
+
   const handleGenerateBarcode = useCallback((product: Product) => {
     setSelectedProductForBarcode(product);
     setIsBarcodeModalOpen(true);
   }, []);
+
   const handleOpenPriceModal = useCallback(() => {
     setIsPriceModalOpen(true);
     setScannedProduct(null);
@@ -1594,6 +1884,7 @@ const ProductsPage = () => {
       if (input) input.focus();
     }, 100);
   }, []);
+
   const handleBarcodeScan = useCallback(
     (code: string) => {
       const product = products.find((p) => p.barcode === code);
@@ -1607,40 +1898,49 @@ const ProductsPage = () => {
             : product.name;
         showNotification(
           `Precio de ${productName}: ${formatCurrency(product.price)}`,
-          "success"
+          "success",
         );
       } else {
         showNotification("Producto no encontrado", "error");
       }
       setBarcodeInput("");
     },
-    [products, rubro, showNotification]
+    [products, rubro, showNotification],
   );
+
   const handleAddProduct = useCallback(async () => {
     const categories = await loadCustomCategories();
     setGlobalCustomCategories(categories);
     setIsOpenModal(true);
   }, [loadCustomCategories]);
+
   const handleAddCategory = useCallback(async () => {
     if (!newProduct.customCategory?.trim()) return;
+
     const trimmedCategory = toCapitalize(newProduct.customCategory.trim());
     const lowerName = trimmedCategory.toLowerCase();
     const alreadyExists = globalCustomCategories.some(
-      (cat) => cat.name.toLowerCase() === lowerName && cat.rubro === rubro
+      (cat) => cat.name.toLowerCase() === lowerName && cat.rubro === rubro,
     );
+
     if (alreadyExists) {
       showNotification("La categoría ya existe para este rubro", "error");
       return;
     }
+
     const newCategory = {
       name: trimmedCategory,
       rubro: rubro,
     };
+
     try {
       await customCategoriesApi.create(newCategory);
+
       setGlobalCustomCategories((prev) => [...prev, newCategory]);
+
       updateField("customCategories", [newCategory]);
       updateField("customCategory", "");
+
       showNotification("Categoría agregada correctamente", "success");
     } catch (error) {
       console.error("Error al guardar categoría:", error);
@@ -1653,16 +1953,19 @@ const ProductsPage = () => {
     showNotification,
     updateField,
   ]);
+
   const handleConfirmAddProduct = useCallback(async () => {
     const validationErrors = validateProduct(newProduct);
     if (validationErrors.length > 0) {
       showNotification(validationErrors.join(", "), "error");
       return;
     }
+
     if (!newProduct.customCategories?.length && !newProduct.customCategory) {
       showNotification("Por favor, complete todos los campos", "error");
       return;
     }
+
     const productToSave = {
       ...newProduct,
       rubro: rubro,
@@ -1685,64 +1988,80 @@ const ProductsPage = () => {
             category: "",
           }
         : newProduct.category
-        ? {
-            customCategories: [],
-            category: newProduct.category,
-          }
-        : {
-            customCategories: [],
-            category: "",
-          }),
+          ? {
+              customCategories: [],
+              category: newProduct.category,
+            }
+          : {
+              customCategories: [],
+              category: "",
+            }),
     };
+
     try {
       if (editingProduct) {
         await updateProduct(editingProduct.id, productToSave);
+
+        // Si hay una lista de precios seleccionada, actualizar el precio en esa lista
         if (selectedPriceListId) {
           try {
-            await productPricesApi.update(editingProduct.id, selectedPriceListId, {
-              price: productToSave.price,
-            });
-          } catch {
-            await productPricesApi.create({
-              productId: editingProduct.id,
-              priceListId: selectedPriceListId,
-              price: productToSave.price,
-            });
+            const existing = await productPricesApi
+              .getByProductAndPriceList(editingProduct.id, selectedPriceListId)
+              .catch(() => null);
+
+            if (existing) {
+              await productPricesApi.update(
+                editingProduct.id,
+                selectedPriceListId,
+                {
+                  price: productToSave.price,
+                },
+              );
+            } else {
+              await productPricesApi.create({
+                productId: editingProduct.id,
+                priceListId: selectedPriceListId,
+                price: productToSave.price,
+              });
+            }
+          } catch (error) {
+            console.error("Error updating product price:", error);
           }
         }
       } else {
         const addedProduct = await addProduct(productToSave);
+
+        // Si hay una lista de precios seleccionada, guardar el precio en esa lista
         if (selectedPriceListId) {
-          try {
-            await productPricesApi.update(addedProduct.id, selectedPriceListId, {
-              price: productToSave.price,
-            });
-          } catch {
-            await productPricesApi.create({
-              productId: addedProduct.id,
-              priceListId: selectedPriceListId,
-              price: productToSave.price,
-            });
-          }
+          await productPricesApi.create({
+            productId: addedProduct.id,
+            priceListId: selectedPriceListId,
+            price: productToSave.price,
+          });
         }
       }
+
       const updatedCategories = await loadCustomCategories();
       setGlobalCustomCategories(updatedCategories);
+
+      // Recargar precios de productos
       if (selectedPriceListId) {
         const prices = await productPricesApi.getAll({
           priceListId: selectedPriceListId,
         });
+
         const priceMap: Record<number, number> = {};
         prices.forEach((price) => {
           priceMap[price.productId] = price.price;
         });
         setProductPrices(priceMap);
       }
+
       showNotification(
         `Producto ${productToSave.name} ${
           editingProduct ? "actualizado" : "agregado"
         } correctamente`,
-        "success"
+        "success",
       );
     } catch (error) {
       console.error("Error al guardar el producto:", error);
@@ -1761,13 +2080,14 @@ const ProductsPage = () => {
     showNotification,
     selectedPriceListId,
   ]);
+
   const handleConfirmDelete = useCallback(async () => {
     if (productToDelete) {
       try {
         await deleteProduct(productToDelete.id);
         showNotification(
           `Producto ${productToDelete.name} eliminado`,
-          "success"
+          "success",
         );
         setProductToDelete(null);
       } catch {
@@ -1776,6 +2096,7 @@ const ProductsPage = () => {
     }
     setIsConfirmModalOpen(false);
   }, [productToDelete, deleteProduct, showNotification]);
+
   const handleCloseModal = useCallback(() => {
     setIsOpenModal(false);
     setNewBrand("");
@@ -1784,17 +2105,21 @@ const ProductsPage = () => {
     resetForm();
     setEditingProduct(null);
   }, [resetForm]);
+
   const handleEditProduct = useCallback(
     async (product: Product) => {
       const categories = await loadCustomCategories();
       setGlobalCustomCategories(categories);
+
       setEditingProduct(product);
       setNewBrand(product.brand || "");
       setNewColor(product.color || "");
+
       let categoriesToSet = (product.customCategories || []).map((cat) => ({
         name: toCapitalize(cat.name),
         rubro: cat.rubro || product.rubro || rubro || "comercio",
       }));
+
       if (categoriesToSet.length === 0 && product.category) {
         categoriesToSet = [
           {
@@ -1803,12 +2128,16 @@ const ProductsPage = () => {
           },
         ];
       }
+
       const hasIvaIncluded =
         product.hasIvaIncluded !== undefined ? product.hasIvaIncluded : true;
+
+      // Obtener precio según lista seleccionada
       let price = product.price;
       if (selectedPriceListId && productPrices[product.id] !== undefined) {
         price = productPrices[product.id];
       }
+
       setForm({
         ...product,
         price,
@@ -1821,27 +2150,32 @@ const ProductsPage = () => {
         setMinStock: product.setMinStock || false,
         minStock: product.minStock || 0,
       });
+
       setIsOpenModal(true);
     },
-    [rubro, loadCustomCategories, setForm, selectedPriceListId, productPrices]
+    [rubro, loadCustomCategories, setForm, selectedPriceListId, productPrices],
   );
+
   const handleDeleteProduct = useCallback((product: Product) => {
     setProductToDelete(product);
     setIsConfirmModalOpen(true);
   }, []);
+
   const sortedProducts = useSortedProducts(
     products,
     filters,
     sortConfig,
     rubro,
-    debouncedSearchQuery
+    debouncedSearchQuery,
   );
+
   const indexOfLastProduct = currentPage * itemsPerPage;
   const indexOfFirstProduct = indexOfLastProduct - itemsPerPage;
   const currentProducts = sortedProducts.slice(
     indexOfFirstProduct,
-    indexOfLastProduct
+    indexOfLastProduct,
   );
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const isModalOpen =
@@ -1854,9 +2188,11 @@ const ProductsPage = () => {
         showReturnsHistory ||
         isSizeDeleteModalOpen ||
         isCategoryDeleteModalOpen;
+
       if (isModalOpen || rubro === "Todos los rubros") {
         return;
       }
+
       switch (e.key) {
         case "F2":
           e.preventDefault();
@@ -1872,7 +2208,9 @@ const ProductsPage = () => {
           break;
       }
     };
+
     window.addEventListener("keydown", handleKeyDown);
+
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
@@ -1890,6 +2228,7 @@ const ProductsPage = () => {
     isSizeDeleteModalOpen,
     isCategoryDeleteModalOpen,
   ]);
+
   useEffect(() => {
     const shouldDisableSave = editingProduct
       ? !hasChanges(editingProduct, newProduct)
@@ -1898,8 +2237,10 @@ const ProductsPage = () => {
         !newProduct.costPrice ||
         !newProduct.price ||
         !newProduct.unit;
+
     setIsSaveDisabled(shouldDisableSave);
   }, [newProduct, editingProduct, hasChanges]);
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -1909,7 +2250,7 @@ const ProductsPage = () => {
           storedReturns.map((r) => ({
             ...r,
             id: Number(r.id),
-          }))
+          })),
         );
         await loadCustomCategories();
       } catch (error) {
@@ -1917,8 +2258,10 @@ const ProductsPage = () => {
         showNotification("Error al cargar los datos", "error");
       }
     };
+
     fetchData();
   }, [fetchProducts, loadCustomCategories, showNotification]);
+
   useEffect(() => {
     const fetchCategories = async () => {
       const categories = await loadCustomCategories();
@@ -1928,26 +2271,31 @@ const ProductsPage = () => {
       fetchCategories();
     }
   }, [rubro, isOpenModal, loadCustomCategories]);
+
   useEffect(() => {
     const loadSuppliers = async () => {
       const supplierMap: Record<number, string> = {};
+
       for (const product of products) {
-        try {
-          const supplierProducts = await supplierProductsApi.getByProduct(product.id);
-          if (supplierProducts && supplierProducts.length > 0) {
-            const supplier = await suppliersApi.getById(supplierProducts[0].supplierId);
-            if (supplier) {
-              supplierMap[product.id] = supplier.companyName;
-            }
+        const supplierProductResults =
+          await supplierProductsApi.getByProduct(product.id);
+
+        if (supplierProductResults.length > 0) {
+          const supplier = await suppliersApi.getById(
+            supplierProductResults[0].supplierId,
+          );
+          if (supplier) {
+            supplierMap[product.id] = supplier.companyName;
           }
-        } catch (error) {
-          console.error(`Error loading supplier for product ${product.id}:`, error);
         }
       }
+
       setProductSuppliers(supplierMap);
     };
+
     loadSuppliers();
   }, [products]);
+
   useEffect(() => {
     const initialize = async () => {
       await loadCustomCategories();
@@ -1955,14 +2303,18 @@ const ProductsPage = () => {
         resetForm();
       }
     };
+
     initialize();
   }, [rubro, isOpenModal, loadCustomCategories, editingProduct, resetForm]);
   useEffect(() => {
+    // Ejecutar limpieza de duplicados al cargar la página
     const initialize = async () => {
       await runPriceListCleanup();
     };
+
     initialize();
   }, []);
+
   useEffect(() => {
     if (rubro === "indumentaria") {
       loadClothingSizes();
@@ -1970,6 +2322,7 @@ const ProductsPage = () => {
       setClothingSizes([]);
     }
   }, [rubro, products, loadClothingSizes]);
+
   const handleBrandChange = useCallback(
     (value: string | number) => {
       const stringValue = value.toString();
@@ -1978,8 +2331,9 @@ const ProductsPage = () => {
         updateField("brand", toCapitalize(stringValue));
       }
     },
-    [updateField]
+    [updateField],
   );
+
   const handleColorChange = useCallback(
     (value: string | number) => {
       const stringValue = value.toString();
@@ -1988,16 +2342,18 @@ const ProductsPage = () => {
         updateField("color", toCapitalize(stringValue));
       }
     },
-    [updateField]
+    [updateField],
   );
+
   const handleSizeChange = useCallback(
     (value: string | number) => {
       const stringValue = value.toString();
       setNewSize(stringValue);
       updateField("size", toCapitalize(stringValue));
     },
-    [updateField]
+    [updateField],
   );
+
   return (
     <ProtectedRoute>
       <Box
@@ -2020,7 +2376,8 @@ const ProductsPage = () => {
           <Typography variant="h5" fontWeight="semibold">
             Productos
           </Typography>
-          {}
+
+          {/* Selector de lista de precios */}
           {rubro !== "Todos los rubros" && priceLists.length > 0 && (
             <Select
               label="Lista de precios"
@@ -2041,7 +2398,8 @@ const ProductsPage = () => {
             />
           )}
         </Box>
-        {}
+
+        {/* Header con búsqueda y acciones */}
         <Box
           sx={{
             display: "flex",
@@ -2109,7 +2467,8 @@ const ProductsPage = () => {
             </Button>
           </Box>
         </Box>
-        {}
+
+        {/* Tabla de productos */}
         <Box
           sx={{
             display: "flex",
@@ -2161,6 +2520,7 @@ const ProductsPage = () => {
                     >
                       Ubicación
                     </TableCell>
+
                     {rubro === "indumentaria" && (
                       <>
                         <TableCell
@@ -2321,6 +2681,7 @@ const ProductsPage = () => {
               </Table>
             </TableContainer>
           </Box>
+
           {sortedProducts.length > 0 && (
             <Pagination
               text="Productos por página"
@@ -2329,7 +2690,8 @@ const ProductsPage = () => {
             />
           )}
         </Box>
-        {}
+
+        {/* Modales */}
         <Modal
           isOpen={isSizeDeleteModalOpen}
           onClose={() => setIsSizeDeleteModalOpen(false)}
@@ -2379,6 +2741,7 @@ const ProductsPage = () => {
             </Typography>
           </Box>
         </Modal>
+
         <Modal
           isOpen={isSelectionModalOpen}
           onClose={() => setIsSelectionModalOpen(false)}
@@ -2438,6 +2801,7 @@ const ProductsPage = () => {
             </Button>
           </Box>
         </Modal>
+
         <Modal
           isOpen={showReturnsHistory}
           onClose={() => setShowReturnsHistory(false)}
@@ -2478,7 +2842,7 @@ const ProductsPage = () => {
                   {returns
                     .sort(
                       (a, b) =>
-                        new Date(b.date).getTime() - new Date(a.date).getTime()
+                        new Date(b.date).getTime() - new Date(a.date).getTime(),
                     )
                     .map((ret, index) => (
                       <tr
@@ -2505,6 +2869,7 @@ const ProductsPage = () => {
             )}
           </div>
         </Modal>
+
         <Modal
           isOpen={isReturnModalOpen}
           onClose={() => {
@@ -2564,7 +2929,7 @@ const ProductsPage = () => {
                         label: getDisplayProductName(
                           selectedReturnProduct,
                           rubro,
-                          false
+                          false,
                         ),
                       }
                     : null
@@ -2584,6 +2949,7 @@ const ProductsPage = () => {
                 }
               />
             </div>
+
             {selectedReturnProduct && (
               <div className="mt-2 p-3 bg-blue_xl dark:bg-gray_m rounded-lg">
                 <p className="font-semibold">Producto seleccionado:</p>
@@ -2596,6 +2962,7 @@ const ProductsPage = () => {
                 </p>
               </div>
             )}
+
             {selectedReturnProduct && (
               <div className="flex flex-col gap-2">
                 <label className="block text-gray_m dark:text-white text-sm font-semibold">
@@ -2622,7 +2989,7 @@ const ProductsPage = () => {
                     label=""
                     value={returnUnit || selectedReturnProduct?.unit || ""}
                     options={getCompatibleUnits(
-                      selectedReturnProduct?.unit || "Unid."
+                      selectedReturnProduct?.unit || "Unid.",
                     ).map((unit) => ({
                       value: unit.value,
                       label: unit.label,
@@ -2635,6 +3002,7 @@ const ProductsPage = () => {
                 </div>
               </div>
             )}
+
             <div>
               <label className="block text-gray_m dark:text-white text-sm font-semibold">
                 Motivo de la devolución
@@ -2650,6 +3018,7 @@ const ProductsPage = () => {
             </div>
           </div>
         </Modal>
+
         <Modal
           isOpen={isOpenModal}
           onConfirm={handleConfirmAddProduct}
@@ -2710,6 +3079,7 @@ const ProductsPage = () => {
             onCategoryDelete={handleDeleteCategoryClick}
           />
         </Modal>
+
         <Modal
           isOpen={isCategoryDeleteModalOpen}
           onClose={() => setIsCategoryDeleteModalOpen(false)}
@@ -2757,6 +3127,7 @@ const ProductsPage = () => {
             </Typography>
           </Box>
         </Modal>
+
         <Modal
           isOpen={isConfirmModalOpen}
           onClose={() => setIsConfirmModalOpen(false)}
@@ -2805,6 +3176,7 @@ const ProductsPage = () => {
             </Typography>
           </Box>
         </Modal>
+
         <Modal
           isOpen={isPriceModalOpen}
           onClose={() => setIsPriceModalOpen(false)}
@@ -2840,6 +3212,7 @@ const ProductsPage = () => {
                 }}
               />
             </div>
+
             {scannedProduct && (
               <div className="mt-4 p-4 bg-blue_xl dark:bg-gray_b rounded-lg">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -2882,7 +3255,7 @@ const ProductsPage = () => {
                         {format(
                           parseISO(scannedProduct.expiration),
                           "dd/MM/yyyy",
-                          { locale: es }
+                          { locale: es },
                         )}
                       </p>
                     </div>
@@ -2898,6 +3271,7 @@ const ProductsPage = () => {
             )}
           </div>
         </Modal>
+
         {isBarcodeModalOpen && selectedProductForBarcode && (
           <BarcodeGenerator
             product={selectedProductForBarcode}
@@ -2907,15 +3281,17 @@ const ProductsPage = () => {
                 prev.map((p) =>
                   p.id === selectedProductForBarcode.id
                     ? { ...p, barcode: newBarcode }
-                    : p
-                )
+                    : p,
+                ),
               );
-              updateProduct(selectedProductForBarcode.id, {
+
+              productsApi.update(selectedProductForBarcode.id, {
                 barcode: newBarcode,
               });
             }}
           />
         )}
+
         <Notification
           isOpen={isNotificationOpen}
           message={notificationMessage}
@@ -2926,4 +3302,5 @@ const ProductsPage = () => {
     </ProtectedRoute>
   );
 };
+
 export default ProductsPage;

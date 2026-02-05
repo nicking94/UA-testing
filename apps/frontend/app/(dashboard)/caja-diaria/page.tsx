@@ -102,14 +102,19 @@ const CajaDiariaPage = () => {
       for (const cash of openPreviousCashes) {
         const cashIncome = (cash.movements || [])
           .filter((m) => m.type === "INGRESO" && m.paymentMethod === "EFECTIVO")
-          .reduce((sum, m) => sum + m.amount, 0);
+          .reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
         const cashExpense = (cash.movements || [])
           .filter((m) => m.type === "EGRESO" && m.paymentMethod === "EFECTIVO")
-          .reduce((sum, m) => sum + m.amount, 0);
+          .reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
+        const otherIncome = (cash.movements || [])
+          .filter((m) => m.type === "INGRESO" && m.paymentMethod !== "EFECTIVO")
+          .reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
+
         const updatedCash = await closeDailyCash(cash.id, {
           closingAmount: cashIncome - cashExpense,
           closingDifference: 0,
           closedBy: "Sistema",
+          otherIncome: otherIncome,
         });
         setDailyCashes((prev) =>
           prev.map((dc) => (dc.id === cash.id ? updatedCash : dc)),

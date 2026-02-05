@@ -35,23 +35,23 @@ export class DailyCashService {
   private formatMovement(m: any) {
     return {
       isDeposit: m.isDeposit,
-      originalAmount: m.originalAmount !== undefined ? Number(m.originalAmount) : null,
+      originalAmount: m.originalAmount !== undefined ? (isNaN(Number(m.originalAmount)) ? null : Number(m.originalAmount)) : null,
       isBudgetGroup: m.isBudgetGroup,
       method: m.method,
-      amount: Number(m.amount),
-      manualAmount: m.manualAmount !== undefined ? Number(m.manualAmount) : null,
-      discount: m.discount !== undefined ? Number(m.discount) : 0,
-      manualProfitPercentage: m.manualProfitPercentage !== undefined ? Number(m.manualProfitPercentage) : null,
+      amount: isNaN(Number(m.amount)) ? 0 : Number(m.amount),
+      manualAmount: m.manualAmount !== undefined ? (isNaN(Number(m.manualAmount)) ? null : Number(m.manualAmount)) : null,
+      discount: m.discount !== undefined ? (isNaN(Number(m.discount)) ? 0 : Number(m.discount)) : 0,
+      manualProfitPercentage: m.manualProfitPercentage !== undefined ? (isNaN(Number(m.manualProfitPercentage)) ? null : Number(m.manualProfitPercentage)) : null,
       description: m.description,
       type: m.type,
       date: m.date ? new Date(m.date) : new Date(),
       paymentMethod: m.paymentMethod,
       productId: m.productId ? Number(m.productId) : null,
       productName: m.productName,
-      costPrice: m.costPrice !== undefined ? Number(m.costPrice) : null,
-      sellPrice: m.sellPrice !== undefined ? Number(m.sellPrice) : null,
-      quantity: m.quantity !== undefined ? Number(m.quantity) : null,
-      profit: m.profit !== undefined ? Number(m.profit) : null,
+      costPrice: m.costPrice !== undefined ? (isNaN(Number(m.costPrice)) ? null : Number(m.costPrice)) : null,
+      sellPrice: m.sellPrice !== undefined ? (isNaN(Number(m.sellPrice)) ? null : Number(m.sellPrice)) : null,
+      quantity: m.quantity !== undefined ? (isNaN(Number(m.quantity)) ? null : Number(m.quantity)) : null,
+      profit: m.profit !== undefined ? (isNaN(Number(m.profit)) ? null : Number(m.profit)) : null,
       rubro: m.rubro,
       unit: m.unit,
       isCreditPayment: m.isCreditPayment,
@@ -60,9 +60,9 @@ export class DailyCashService {
       supplierName: m.supplierName,
       size: m.size,
       color: m.color,
-      manualProfit: m.manualProfit !== undefined ? Number(m.manualProfit) : null,
-      productsProfit: m.productsProfit !== undefined ? Number(m.productsProfit) : null,
-      profitPercentage: m.profitPercentage !== undefined ? Number(m.profitPercentage) : null,
+      manualProfit: m.manualProfit !== undefined ? (isNaN(Number(m.manualProfit)) ? null : Number(m.manualProfit)) : null,
+      productsProfit: m.productsProfit !== undefined ? (isNaN(Number(m.productsProfit)) ? null : Number(m.productsProfit)) : null,
+      profitPercentage: m.profitPercentage !== undefined ? (isNaN(Number(m.profitPercentage)) ? null : Number(m.profitPercentage)) : null,
       budgetId: m.budgetId,
       fromBudget: m.fromBudget,
     };
@@ -102,16 +102,16 @@ export class DailyCashService {
       data: {
         date: startOfDay, // Store exactly at midnight UTC for consistency
         closed: rest.closed === true,
-        closingAmount: rest.closingAmount !== undefined ? Number(rest.closingAmount) : null,
+        closingAmount: rest.closingAmount !== undefined ? (isNaN(Number(rest.closingAmount)) ? 0 : Number(rest.closingAmount)) : null,
         closingDate: rest.closingDate ? new Date(rest.closingDate) : null,
-        closingDifference: rest.closingDifference !== undefined ? Number(rest.closingDifference) : null,
-        cashIncome: rest.cashIncome !== undefined ? Number(rest.cashIncome) : 0,
-        cashExpense: rest.cashExpense !== undefined ? Number(rest.cashExpense) : 0,
-        otherIncome: rest.otherIncome !== undefined ? Number(rest.otherIncome) : 0,
-        totalIncome: rest.totalIncome !== undefined ? Number(rest.totalIncome) : 0,
-        totalCashIncome: rest.totalCashIncome !== undefined ? Number(rest.totalCashIncome) : 0,
-        totalExpense: rest.totalExpense !== undefined ? Number(rest.totalExpense) : 0,
-        totalProfit: rest.totalProfit !== undefined ? Number(rest.totalProfit) : 0,
+        closingDifference: rest.closingDifference !== undefined ? (isNaN(Number(rest.closingDifference)) ? 0 : Number(rest.closingDifference)) : null,
+        cashIncome: rest.cashIncome !== undefined ? (isNaN(Number(rest.cashIncome)) ? 0 : Number(rest.cashIncome)) : 0,
+        cashExpense: rest.cashExpense !== undefined ? (isNaN(Number(rest.cashExpense)) ? 0 : Number(rest.cashExpense)) : 0,
+        otherIncome: rest.otherIncome !== undefined ? (isNaN(Number(rest.otherIncome)) ? 0 : Number(rest.otherIncome)) : 0,
+        totalIncome: rest.totalIncome !== undefined ? (isNaN(Number(rest.totalIncome)) ? 0 : Number(rest.totalIncome)) : 0,
+        totalCashIncome: rest.totalCashIncome !== undefined ? (isNaN(Number(rest.totalCashIncome)) ? 0 : Number(rest.totalCashIncome)) : 0,
+        totalExpense: rest.totalExpense !== undefined ? (isNaN(Number(rest.totalExpense)) ? 0 : Number(rest.totalExpense)) : 0,
+        totalProfit: rest.totalProfit !== undefined ? (isNaN(Number(rest.totalProfit)) ? 0 : Number(rest.totalProfit)) : 0,
         comments: rest.comments,
         openedBy: rest.openedBy,
         closedBy: rest.closedBy,
@@ -130,16 +130,16 @@ export class DailyCashService {
     
     const updateData: any = {
       closed: rest.closed !== undefined ? rest.closed === true : undefined,
-      closingAmount: rest.closingAmount !== undefined ? Number(rest.closingAmount) : undefined,
+      closingAmount: rest.closingAmount !== undefined ? (isNaN(Number(rest.closingAmount)) ? 0 : Number(rest.closingAmount)) : undefined,
       closingDate: rest.closingDate ? new Date(rest.closingDate) : undefined,
-      closingDifference: rest.closingDifference !== undefined ? Number(rest.closingDifference) : undefined,
-      cashIncome: rest.cashIncome !== undefined ? Number(rest.cashIncome) : undefined,
-      cashExpense: rest.cashExpense !== undefined ? Number(rest.cashExpense) : undefined,
-      otherIncome: rest.otherIncome !== undefined ? Number(rest.otherIncome) : undefined,
-      totalIncome: rest.totalIncome !== undefined ? Number(rest.totalIncome) : undefined,
-      totalCashIncome: rest.totalCashIncome !== undefined ? Number(rest.totalCashIncome) : undefined,
-      totalExpense: rest.totalExpense !== undefined ? Number(rest.totalExpense) : undefined,
-      totalProfit: rest.totalProfit !== undefined ? Number(rest.totalProfit) : undefined,
+      closingDifference: rest.closingDifference !== undefined ? (isNaN(Number(rest.closingDifference)) ? 0 : Number(rest.closingDifference)) : undefined,
+      cashIncome: rest.cashIncome !== undefined ? (isNaN(Number(rest.cashIncome)) ? 0 : Number(rest.cashIncome)) : undefined,
+      cashExpense: rest.cashExpense !== undefined ? (isNaN(Number(rest.cashExpense)) ? 0 : Number(rest.cashExpense)) : undefined,
+      otherIncome: rest.otherIncome !== undefined ? (isNaN(Number(rest.otherIncome)) ? 0 : Number(rest.otherIncome)) : undefined,
+      totalIncome: rest.totalIncome !== undefined ? (isNaN(Number(rest.totalIncome)) ? 0 : Number(rest.totalIncome)) : undefined,
+      totalCashIncome: rest.totalCashIncome !== undefined ? (isNaN(Number(rest.totalCashIncome)) ? 0 : Number(rest.totalCashIncome)) : undefined,
+      totalExpense: rest.totalExpense !== undefined ? (isNaN(Number(rest.totalExpense)) ? 0 : Number(rest.totalExpense)) : undefined,
+      totalProfit: rest.totalProfit !== undefined ? (isNaN(Number(rest.totalProfit)) ? 0 : Number(rest.totalProfit)) : undefined,
       comments: rest.comments !== undefined ? rest.comments : undefined,
       openedBy: rest.openedBy !== undefined ? rest.openedBy : undefined,
       closedBy: rest.closedBy !== undefined ? rest.closedBy : undefined,
@@ -164,16 +164,26 @@ export class DailyCashService {
   }
 
   async close(id: number, data: any) {
-    return this.prisma.dailyCash.update({
-      where: { id: Number(id) },
-      data: {
-        closed: true,
-        closingAmount: Number(data.closingAmount),
-        closingDate: new Date(),
-        closingDifference: Number(data.closingDifference || 0),
-        closedBy: data.closedBy,
-        comments: data.comments,
-      },
-    });
+    try {
+      const closingAmount = Number(data.closingAmount);
+      const closingDifference = Number(data.closingDifference || 0);
+      const otherIncome = Number(data.otherIncome || 0);
+
+      return await this.prisma.dailyCash.update({
+        where: { id: Number(id) },
+        data: {
+          closed: true,
+          closingAmount: isNaN(closingAmount) ? 0 : closingAmount,
+          closingDate: new Date(),
+          closingDifference: isNaN(closingDifference) ? 0 : closingDifference,
+          closedBy: data.closedBy,
+          comments: data.comments,
+          otherIncome: isNaN(otherIncome) ? 0 : otherIncome,
+        },
+      });
+    } catch (error) {
+      console.error(`Error closing daily cash ${id}:`, error);
+      throw error;
+    }
   }
 }
