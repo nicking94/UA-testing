@@ -153,15 +153,14 @@ Y muchos más endpoints para cada módulo...
 
 ## Próximos Pasos
 
-1. **Migrar datos**: Si tienes datos en IndexedDB, necesitarás crear un script de migración
-2. **Actualizar frontend**: Conectar el frontend con la nueva API REST
-3. **Configurar CORS**: Ajustar las políticas CORS según tu entorno
-4. **Autenticación**: Implementar el flujo de autenticación en el frontend
+1. **Configuración de Producción**: Configurar variables de entorno y certificados SSL en el servidor de despliegue.
+2. **Migración de Datos Históricos**: Si existen datos previos en IndexedDB, utilizar el módulo de Import/Export para migrarlos a la base de datos central.
+3. **Monitoreo**: Implementar logs de producción y monitoreo de base de datos.
 
 ## Notas
 
 - El backend usa JWT para autenticación
 - Todas las rutas del backend (excepto `/auth/login` y `/auth/register`) requieren autenticación
-- El frontend aún usa IndexedDB localmente - necesitarás actualizarlo para usar la API REST
+- El frontend ha sido completamente migrado de IndexedDB local a la API REST centralizada.
 
 # UA-testing
