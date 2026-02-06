@@ -341,7 +341,7 @@ export class BackupService {
 
           // Payments
           for (const p of getList('payment')) {
-            const { id: oldId, saleId, customerId, date, createdAt, updatedAt, method, ...rest } = p;
+            const { id: oldId, saleId, customerId, date, createdAt, updatedAt, method, saleDate, checkStatus, ...rest } = p;
             const newSaleId = saleMap.get(saleId);
             if (newSaleId) {
               const newPayment = await tx.payment.create({
