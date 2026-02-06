@@ -41,19 +41,21 @@ export default function AppLayout({
       
       const performLogout = async () => {
         try {
-          // Activamos modo silencioso por si queda algo vivo
+          // Activamos modo silencioso
           apiClient.setIgnoreSessionErrors(true);
           
+          // Logout lógico
           authApi.logout();
-          router.replace("/login");
+          
+          // Navegación FUERTE: Recarga completa para limpiar memoria y estado
+          window.location.href = "/login";
         } catch (error) {
           console.error("Error crítico al cerrar sesión:", error);
-          // Si falla, forzamos recarga como último recurso
           window.location.href = "/login";
         }
       };
 
-      // Un pequeño tick para asegurar que el DOM se ha limpiado
+      // Ejecutamos casi inmediatamente
       const timer = setTimeout(performLogout, 10);
       return () => clearTimeout(timer);
     }
