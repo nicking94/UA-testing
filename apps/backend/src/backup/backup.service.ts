@@ -24,6 +24,8 @@ export class BackupService {
         productReturns,
         priceLists,
         productPrices,
+        notes,
+        notifications,
       ] = await Promise.all([
         this.prisma.product.findMany({ where: { userId } }),
         this.prisma.customer.findMany({ where: { userId } }),
@@ -56,6 +58,8 @@ export class BackupService {
         this.prisma.productPrice.findMany({
           where: { product: { userId } }
         }),
+        this.prisma.note.findMany({ where: { userId } }),
+        this.prisma.notification.findMany({ where: { userId } }),
       ]);
 
       return {
@@ -75,8 +79,10 @@ export class BackupService {
         productReturns,
         priceLists,
         productPrices,
+        notes,
+        notifications,
         exportedAt: new Date().toISOString(),
-        version: '3.0.0', // Bump version for multi-tenancy
+        version: '3.1.0',
       };
     } catch (error) {
       throw new InternalServerErrorException(
@@ -89,24 +95,31 @@ export class BackupService {
     return this.prisma.$transaction(
       async (tx) => {
         try {
-          // 1. Clear current user's data first (reversing relationship order)
-          // We must be careful to only delete data belonging to this userId.
+          // 1. Clear current user's data (reversing relationship order to avoid FK errors)
           
+          // Dependencies of Sales
           await tx.dailyCashMovement.deleteMany({ where: { dailyCash: { userId } } });
-          await tx.saleItem.deleteMany({ where: { sale: { userId } } });
-          await tx.installment.deleteMany({ where: { sale: { userId } } });
           await tx.payment.deleteMany({ where: { sale: { userId } } });
-          await tx.budgetItem.deleteMany({ where: { budget: { userId } } });
-          await tx.productPrice.deleteMany({ where: { product: { userId } } });
-          await tx.supplierProduct.deleteMany({ where: { supplier: { userId } } });
+          await tx.installment.deleteMany({ where: { sale: { userId } } });
+          await tx.saleItem.deleteMany({ where: { sale: { userId } } });
+          await tx.creditAlert.deleteMany({ where: { sale: { userId } } });
+          await tx.saleEditHistory.deleteMany({ where: { sale: { userId } } });
 
-          // Main tables
+          // Dependencies of Budgets
+          await tx.budgetItem.deleteMany({ where: { budget: { userId } } });
+
+          // Dependencies of Products
+          await tx.productPrice.deleteMany({ where: { product: { userId } } });
+          await tx.productCustomCategory.deleteMany({ where: { product: { userId } } });
+          await tx.supplierProduct.deleteMany({ where: { product: { userId } } });
+          await tx.productReturn.deleteMany({ where: { product: { userId } } });
+
+          // Models with direct userId
           await tx.sale.deleteMany({ where: { userId } });
           await tx.dailyCash.deleteMany({ where: { userId } });
           await tx.budget.deleteMany({ where: { userId } });
           await tx.expense.deleteMany({ where: { userId } });
           await tx.expenseCategory.deleteMany({ where: { userId } });
-          await tx.productReturn.deleteMany({ where: { product: { userId } } });
           await tx.promotion.deleteMany({ where: { userId } });
           await tx.product.deleteMany({ where: { userId } });
           await tx.customer.deleteMany({ where: { userId } });
@@ -115,93 +128,134 @@ export class BackupService {
           await tx.customCategory.deleteMany({ where: { userId } });
           await tx.businessData.deleteMany({ where: { userId } });
           await tx.userPreferences.deleteMany({ where: { userId } });
+          await tx.note.deleteMany({ where: { userId } });
+          await tx.notification.deleteMany({ where: { userId } });
 
           // Helper to handle dates
           const ensureDate = (d: any) => (d ? new Date(d) : null);
 
-          // 2. Import data Ensured with userId
-          
-          if (data.businessData) {
+          // 2. Import Data (Handling common plural/singular naming)
+          const getList = (key: string) => data[key] || data[key + 's'] || [];
+
+          // Business Data
+          const businessData = getList('businessData');
+          if (businessData.length) {
             await tx.businessData.createMany({ 
-              data: data.businessData.map((d: any) => ({ ...d, userId, id: undefined })) 
+              data: businessData.map(({ id, ...rest }: any) => ({ ...rest, userId })) 
             });
           }
 
-          if (data.userPreferences) {
-            await tx.userPreferences.createMany({ 
-              data: data.userPreferences.map((d: any) => ({ ...d, userId, id: undefined })) 
-            });
+          // User Preferences
+          const userPreferences = data.userPreferences || data.preferences || [];
+          if (Array.isArray(userPreferences) && userPreferences.length) {
+             // Preferences might be singular object in some exports or list in others
+             await tx.userPreferences.createMany({
+               data: userPreferences.map(({ id, ...rest }: any) => ({ ...rest, userId }))
+             });
+          } else if (typeof userPreferences === 'object' && !Array.isArray(userPreferences) && Object.keys(userPreferences).length) {
+             const { id, ...rest } = userPreferences as any;
+             await tx.userPreferences.create({ data: { ...rest, userId } });
           }
 
-          if (data.customers) {
+          // Customers
+          const customers = getList('customer');
+          if (customers.length) {
             await tx.customer.createMany({ 
-              data: data.customers.map((d: any) => ({ ...d, userId })) 
+              data: customers.map((c: any) => ({ ...c, userId })) 
             });
           }
 
-          if (data.suppliers) {
+          // Suppliers
+          const suppliers = getList('supplier');
+          if (suppliers.length) {
             await tx.supplier.createMany({
-              data: data.suppliers.map((s: any) => ({
-                ...s,
+              data: suppliers.map(({ id, createdAt, updatedAt, ...rest }: any) => ({
+                ...rest,
                 userId,
-                id: undefined,
-                createdAt: ensureDate(s.createdAt),
-                updatedAt: ensureDate(s.updatedAt),
+                createdAt: ensureDate(createdAt),
+                updatedAt: ensureDate(updatedAt),
               })),
             });
           }
 
-          if (data.products) {
+          // Products
+          const products = getList('product');
+          if (products.length) {
             await tx.product.createMany({
-              data: data.products.map((p: any) => ({
-                ...p,
+              data: products.map(({ id, createdAt, updatedAt, ...rest }: any) => ({
+                ...rest,
                 userId,
-                id: undefined,
-                createdAt: ensureDate(p.createdAt),
-                updatedAt: ensureDate(p.updatedAt),
+                createdAt: ensureDate(createdAt),
+                updatedAt: ensureDate(updatedAt),
               })),
             });
           }
 
-          if (data.priceLists) {
+          // Custom Categories
+          const customCategories = getList('customCategory');
+          if (customCategories.length) {
+            await tx.customCategory.createMany({
+              data: customCategories.map(({ id, ...rest }: any) => ({ ...rest, userId }))
+            });
+          }
+
+          // Price Lists
+          const priceLists = getList('priceList');
+          if (priceLists.length) {
             await tx.priceList.createMany({ 
-              data: data.priceLists.map((d: any) => ({ ...d, userId, id: undefined })) 
+              data: priceLists.map(({ id, ...rest }: any) => ({ ...rest, userId })) 
             });
           }
 
-          if (data.productPrices) {
+          // Product Prices
+          const productPrices = getList('productPrice');
+          if (productPrices.length) {
             await tx.productPrice.createMany({ 
-              data: data.productPrices.map((d: any) => ({ ...d, id: undefined })) 
+              data: productPrices.map(({ id, ...rest }: any) => ({ ...rest })) 
             });
           }
 
-          if (data.expenseCategories) {
+          // Expense Categories
+          const expenseCategories = getList('expenseCategory');
+          if (expenseCategories.length) {
             await tx.expenseCategory.createMany({
-              data: data.expenseCategories.map((d: any) => ({ ...d, userId, id: undefined })),
+              data: expenseCategories.map(({ id, ...rest }: any) => ({ ...rest, userId })),
             });
           }
 
-          if (data.sales) {
-            for (const sale of data.sales) {
-              const { items, installments, id, ...saleData } = sale;
+          // Promotions
+          const promotions = getList('promotion');
+          if (promotions.length) {
+            await tx.promotion.createMany({
+              data: promotions.map(({ id, ...rest }: any) => ({ ...rest, userId }))
+            });
+          }
+
+          // Sales & Related
+          const sales = getList('sale');
+          if (sales.length) {
+            for (const sale of sales) {
+              const { items, installments, id, createdAt, updatedAt, date, ...saleData } = sale;
               await tx.sale.create({
                 data: {
                   ...saleData,
                   userId,
-                  date: ensureDate(saleData.date),
-                  createdAt: ensureDate(saleData.createdAt),
-                  updatedAt: ensureDate(saleData.updatedAt),
-                  items: items ? { create: items.map((it: any) => ({ ...it, id: undefined })) } : undefined,
+                  date: ensureDate(date),
+                  createdAt: ensureDate(createdAt),
+                  updatedAt: ensureDate(updatedAt),
+                  items: items ? { create: items.map(({ id, ...it }: any) => it) } : undefined,
                   installments: installments
                     ? {
-                        create: installments.map((inst: any) => ({
-                          ...inst,
-                          id: undefined,
-                          dueDate: ensureDate(inst.dueDate),
-                          paymentDate: ensureDate(inst.paymentDate),
-                          createdAt: ensureDate(inst.createdAt),
-                          updatedAt: ensureDate(inst.updatedAt),
-                        })),
+                        create: installments.map((inst: any) => {
+                          const { id, createdAt, updatedAt, dueDate, paymentDate, ...instRest } = inst;
+                          return {
+                            ...instRest,
+                            dueDate: ensureDate(dueDate),
+                            paymentDate: ensureDate(paymentDate),
+                            createdAt: ensureDate(createdAt),
+                            updatedAt: ensureDate(updatedAt),
+                          };
+                        }),
                       }
                     : undefined,
                 },
@@ -209,38 +263,43 @@ export class BackupService {
             }
           }
 
-          if (data.payments) {
+          // Payments
+          const payments = getList('payment');
+          if (payments.length) {
             await tx.payment.createMany({
-              data: data.payments.map((p: any) => ({
+              data: payments.map(({ id, date, createdAt, updatedAt, ...p }: any) => ({
                 ...p,
-                id: undefined,
-                date: ensureDate(p.date),
-                createdAt: ensureDate(p.createdAt),
-                updatedAt: ensureDate(p.updatedAt),
+                date: ensureDate(date),
+                createdAt: ensureDate(createdAt),
+                updatedAt: ensureDate(updatedAt),
               })),
             });
           }
 
-          if (data.dailyCash) {
-            for (const cash of data.dailyCash) {
-              const { movements, id, ...cashData } = cash;
+          // Daily Cash & Movements
+          const dailyCashes = getList('dailyCash');
+          if (dailyCashes.length) {
+            for (const cash of dailyCashes) {
+              const { movements, id, date, closingDate, createdAt, updatedAt, ...cashData } = cash;
               await tx.dailyCash.create({
                 data: {
                   ...cashData,
                   userId,
-                  date: ensureDate(cashData.date),
-                  closingDate: ensureDate(cashData.closingDate),
-                  createdAt: ensureDate(cashData.createdAt),
-                  updatedAt: ensureDate(cashData.updatedAt),
+                  date: ensureDate(date),
+                  closingDate: ensureDate(closingDate),
+                  createdAt: ensureDate(createdAt),
+                  updatedAt: ensureDate(updatedAt),
                   movements: movements
                     ? {
-                        create: movements.map((m: any) => ({
-                          ...m,
-                          id: undefined,
-                          date: ensureDate(m.date),
-                          createdAt: ensureDate(m.createdAt),
-                          timestamp: ensureDate(m.timestamp),
-                        })),
+                        create: movements.map((m: any) => {
+                          const { id, date, createdAt, timestamp, ...mRest } = m;
+                          return {
+                            ...mRest,
+                            date: ensureDate(date),
+                            createdAt: ensureDate(createdAt),
+                            timestamp: ensureDate(timestamp),
+                          };
+                        }),
                       }
                     : undefined,
                 },
@@ -248,31 +307,66 @@ export class BackupService {
             }
           }
 
-          if (data.expenses) {
+          // Expenses
+          const expenses = getList('expense');
+          if (expenses.length) {
             await tx.expense.createMany({
-              data: data.expenses.map((e: any) => ({
+              data: expenses.map(({ id, date, createdAt, updatedAt, ...e }: any) => ({
                 ...e,
                 userId,
-                id: undefined,
-                date: ensureDate(e.date),
-                createdAt: ensureDate(e.createdAt),
-                updatedAt: ensureDate(e.updatedAt),
+                date: ensureDate(date),
+                createdAt: ensureDate(createdAt),
+                updatedAt: ensureDate(updatedAt),
               })),
             });
           }
 
-          if (data.budgets) {
-            for (const budget of data.budgets) {
-              const { items, id, ...budgetData } = budget;
+          // Budgets
+          const budgets = getList('budget');
+          if (budgets.length) {
+            for (const budget of budgets) {
+              const { items, id, date, ...budgetData } = budget;
               await tx.budget.create({
                 data: {
                   ...budgetData,
                   userId,
-                  date: ensureDate(budgetData.date),
-                  items: items ? { create: items.map((it: any) => ({ ...it, id: undefined })) } : undefined,
+                  date: ensureDate(date),
+                  items: items ? { create: items.map(({ id, ...it }: any) => it) } : undefined,
                 },
               });
             }
+          }
+
+          // Notes
+          const notes = getList('note');
+          if (notes.length) {
+            await tx.note.createMany({
+              data: notes.map(({ id, ...rest }: any) => ({ ...rest, userId }))
+            });
+          }
+
+          // Notifications
+          const notifications = getList('notification');
+          if (notifications.length) {
+            await tx.notification.createMany({
+              data: notifications.map(({ id, ...rest }: any) => ({ ...rest, userId }))
+            });
+          }
+
+          // Supplier Products
+          const supplierProducts = getList('supplierProduct');
+          if (supplierProducts.length) {
+            await tx.supplierProduct.createMany({
+              data: supplierProducts.map(({ id, ...rest }: any) => rest)
+            });
+          }
+
+          // Product Returns
+          const returns = getList('return'); // Handle 'returns' key
+          if (returns.length) {
+            await tx.productReturn.createMany({
+              data: returns.map(({ id, ...rest }: any) => rest)
+            });
           }
 
           return { message: 'Importación completada exitosamente' };
@@ -282,7 +376,7 @@ export class BackupService {
         }
       },
       {
-        timeout: 60000,
+        timeout: 90000, // Increase timeout for large imports
       },
     );
   }
