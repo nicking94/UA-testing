@@ -27,7 +27,7 @@ export class BackupService {
         notes,
         notifications,
       ] = await Promise.all([
-        this.prisma.product.findMany({ where: { userId } }),
+        this.prisma.product.findMany({ where: { userId }, include: { customCategories: true } }),
         this.prisma.customer.findMany({ where: { userId } }),
         this.prisma.supplier.findMany({ where: { userId } }),
         this.prisma.sale.findMany({
@@ -125,7 +125,7 @@ export class BackupService {
           await tx.note.deleteMany({ where: { userId } });
           await tx.notification.deleteMany({ where: { userId } });
 
-          const ensureDate = (d: any) => (d ? new Date(d) : null);
+          const ensureDate = (d: any) => (d ? new Date(d) : undefined);
           
           const normalizeRubro = (r: any): any => {
             if (!r) return undefined;
@@ -221,7 +221,7 @@ export class BackupService {
 
           // Customers
           for (const c of getList('customer')) {
-            const { id: oldId, userId: _, rubro, ...rest } = c;
+            const { id: oldId, userId: _, rubro, budgets, customerNotes, payments, sales, ...rest } = c;
             // Ensure id is a string and preserved if possible (Customer uses String @id)
             const newCustomer = await tx.customer.create({ 
               data: { ...rest, rubro: normalizeRubro(rubro), id: String(oldId), userId } 
@@ -231,7 +231,7 @@ export class BackupService {
 
           // Suppliers
           for (const s of getList('supplier')) {
-            const { id: oldId, userId: _, createdAt, updatedAt, rubro, ...rest } = s;
+            const { id: oldId, userId: _, createdAt, updatedAt, rubro, supplierProducts, ...rest } = s;
             const newSupplier = await tx.supplier.create({ 
               data: { ...rest, rubro: normalizeRubro(rubro), userId, createdAt: ensureDate(createdAt), updatedAt: ensureDate(updatedAt) } 
             });
@@ -240,7 +240,7 @@ export class BackupService {
 
           // Products
           for (const p of getList('product')) {
-            const { id: oldId, userId: _, createdAt, updatedAt, rubro, unit, ...rest } = p;
+            const { id: oldId, userId: _, createdAt, updatedAt, rubro, unit, customCategories, productPrices, productReturns, saleItems, supplierProducts, ...rest } = p;
             const newProduct = await tx.product.create({ 
               data: { 
                 ...rest, 
@@ -248,7 +248,13 @@ export class BackupService {
                 unit: normalizeUnit(unit),
                 userId, 
                 createdAt: ensureDate(createdAt), 
-                updatedAt: ensureDate(updatedAt) 
+                updatedAt: ensureDate(updatedAt),
+                customCategories: (customCategories && Array.isArray(customCategories)) ? {
+                  create: customCategories.map((cc: any) => ({
+                    name: cc.name,
+                    rubro: normalizeRubro(cc.rubro)
+                  }))
+                } : undefined
               } 
             });
             productMap.set(oldId, newProduct.id);
@@ -256,7 +262,7 @@ export class BackupService {
 
           // Price Lists
           for (const pl of getList('priceList')) {
-            const { id: oldId, userId: _, rubro, ...rest } = pl;
+            const { id: oldId, userId: _, rubro, productPrices, ...rest } = pl;
             const newPL = await tx.priceList.create({ 
               data: { ...rest, rubro: normalizeRubro(rubro), userId } 
             });
@@ -285,7 +291,7 @@ export class BackupService {
 
           // Sales & Related
           for (const sale of getList('sale')) {
-            const { items, installments, id, createdAt, updatedAt, date, customerId, priceListId, rubro, ...saleData } = sale;
+            const { items, installments, id, createdAt, updatedAt, date, customerId, priceListId, rubro, creditAlerts, payments, editHistory, ...saleData } = sale;
             const newSale = await tx.sale.create({
               data: {
                 ...saleData,
@@ -394,7 +400,7 @@ export class BackupService {
 
           // Budgets
           for (const budget of getList('budget')) {
-            const { items, id: oldId, date, customerId, rubro, ...budgetData } = budget;
+            const { items, id: oldId, date, customerId, rubro, budgetNotes, ...budgetData } = budget;
             const newBudget = await tx.budget.create({
               data: {
                 ...budgetData,
