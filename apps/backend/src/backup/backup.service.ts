@@ -145,18 +145,19 @@ export class BackupService {
           const budgetMap = new Map<string | number, string>();
           const customerMap = new Map<string | number, string>();
 
-          // Business Data
-          for (const d of getList('businessData')) {
-            const { id, userId: _, ...rest } = d;
-            await tx.businessData.create({ data: { ...rest, userId } });
-          }
-
-          // User Preferences
+          // User Preferences (Only one per user)
           const prefs = data.userPreferences || data.preferences || [];
           const prefsList = Array.isArray(prefs) ? prefs : (Object.keys(prefs).length ? [prefs] : []);
-          for (const p of prefsList) {
-            const { id, userId: _, ...rest } = p;
+          if (prefsList.length > 0) {
+            const { id, userId: _, ...rest } = prefsList[0]; // Take only the first one
             await tx.userPreferences.create({ data: { ...rest, userId } });
+          }
+
+          // Business Data (Take only the first one to be safe, though not strictly unique in schema)
+          const bData = getList('businessData');
+          if (bData.length > 0) {
+            const { id, userId: _, ...rest } = bData[0];
+            await tx.businessData.create({ data: { ...rest, userId } });
           }
 
           // Customers
