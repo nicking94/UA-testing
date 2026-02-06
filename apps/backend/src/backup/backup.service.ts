@@ -361,7 +361,7 @@ export class BackupService {
 
           // Daily Cash & Movements
           for (const cash of getList('dailyCash')) {
-            const { movements, id: oldId, date, closingDate, createdAt, updatedAt, ...cashData } = cash;
+            const { movements, id: oldId, date, closingDate, createdAt, updatedAt, initialAmount, closed, totalIncome, totalExpense, totalProfit, closingAmount, cashIncome, cashExpense, otherIncome, closingDifference, ...cashData } = cash;
             const newCash = await tx.dailyCash.create({
               data: {
                 ...cashData,
