@@ -29,8 +29,10 @@ class ApiClient {
     if (this.token) {
       headers['Authorization'] = `Bearer ${this.token}`;
     } else if (!endpoint.startsWith('/auth/')) {
-        // Si no hay token y no es una ruta de auth, no hacemos la petición para evitar 401 innecesarios
-        return null as T;
+        // En vez de null, lanzamos un error que capturaremos abajo
+        const authError = new Error('No token');
+        (authError as any).isAuthError = true;
+        throw authError;
     }
     try {
       const response = await fetch(url, {
@@ -38,6 +40,12 @@ class ApiClient {
         headers,
       });
       if (!response.ok) {
+        if (response.status === 401) {
+            const authError = new Error('Unauthorized');
+            (authError as any).isAuthError = true;
+            (authError as any).status = 401;
+            throw authError;
+        }
         const error = await response.json().catch(() => ({
           message: response.statusText,
         }));
@@ -56,7 +64,12 @@ class ApiClient {
         console.error('Error parsing JSON response:', text);
         return text as unknown as T;
       }
-    } catch (error) {
+    } catch (error: any) {
+      // Si es un error de autenticación (llave faltante o expirada), no lo mostramos en consola
+      // Esto evita el ruido rojo al cerrar sesión.
+      if (error.isAuthError) {
+          throw error;
+      }
       console.error(`API Error [${endpoint}]:`, error);
       throw error;
     }
