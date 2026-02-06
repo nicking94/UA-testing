@@ -6,12 +6,11 @@ import { AuthData } from "@/app/lib/types/types";
 import AuthForm from "@/app/components/AuthForm";
 import Notification from "@/app/components/Notification";
 import Common from "@/app/components/LoginScreens/Common";
+
 const LoginPage = () => {
   const router = useRouter();
   const { login, isAuthenticated } = useAuth();
   const [isRedirecting, setIsRedirecting] = useState(false);
-  const [acceptedTerms, setAcceptedTerms] = useState(false);
-  const [showTermsCheckbox, setShowTermsCheckbox] = useState(false);
   const [isOpenNotification, setIsOpenNotification] = useState(false);
   const [notificationMessage, setNotificationMessage] = useState("");
   const [notificationType, setNotificationType] = useState<
@@ -19,6 +18,7 @@ const LoginPage = () => {
   >("error");
   const [isLoading, setIsLoading] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
+
   useEffect(() => {
     if (isAuthenticated === true) {
       router.replace("/caja-diaria");
@@ -27,6 +27,7 @@ const LoginPage = () => {
       setIsInitialized(true);
     }
   }, [isAuthenticated, router]);
+
   useEffect(() => {
     if (isAuthenticated !== null) {
       const initialize = async () => {
@@ -47,47 +48,27 @@ const LoginPage = () => {
             setTimeout(() => setIsOpenNotification(false), 2500);
           }
           
-          // Check for persisted terms acceptance
-          const savedTerms = localStorage.getItem("termsAccepted");
-          if (savedTerms === "true") {
-            setAcceptedTerms(true);
-            setShowTermsCheckbox(false);
-          } else {
-            setShowTermsCheckbox(true);
-          }
-          
           setIsInitialized(true);
         } catch (error) {
           console.error("Error en inicialización:", error);
-          setAcceptedTerms(false);
-          setShowTermsCheckbox(true);
           setIsInitialized(true);
         }
       };
       initialize();
     }
   }, [isAuthenticated]);
+
   const handleLogin = async (data: AuthData) => {
     if (!isInitialized || isRedirecting) return;
-    if (showTermsCheckbox && !acceptedTerms) {
-      setNotificationMessage("Debes aceptar los términos y condiciones");
-      setNotificationType("error");
-      setIsOpenNotification(true);
-      setTimeout(() => setIsOpenNotification(false), 2500);
-      return;
-    }
+
     setIsRedirecting(true);
     setNotificationMessage("Iniciando sesión...");
     setNotificationType("info");
     setIsOpenNotification(true);
+
     try {
       await login(data.username, data.password);
       
-      // Persist terms acceptance if checked
-      if (acceptedTerms) {
-        localStorage.setItem("termsAccepted", "true");
-      }
-
       setNotificationMessage("Inicio de sesión exitoso");
       setNotificationType("success");
       setTimeout(() => {
@@ -104,6 +85,7 @@ const LoginPage = () => {
       setIsRedirecting(false);
     }
   };
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-sky-50 to-blue-100">
@@ -114,14 +96,12 @@ const LoginPage = () => {
       </div>
     );
   }
+
   return (
     <div className="min-h-screen flex">
       <AuthForm
         type="login"
         onSubmit={handleLogin}
-        showTermsCheckbox={showTermsCheckbox}
-        acceptedTerms={acceptedTerms}
-        onTermsCheckboxChange={setAcceptedTerms}
       />
       <Common />
       <Notification
@@ -132,4 +112,5 @@ const LoginPage = () => {
     </div>
   );
 };
+
 export default LoginPage;
