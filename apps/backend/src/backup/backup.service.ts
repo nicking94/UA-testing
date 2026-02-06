@@ -405,7 +405,7 @@ export class BackupService {
 
           // Budgets
           for (const budget of getList('budget')) {
-            const { items, id: oldId, date, customerId, rubro, budgetNotes, ...budgetData } = budget;
+            const { items, id: oldId, date, customerId, rubro, budgetNotes, expirationDate, deposit, remaining, createdAt, updatedAt, ...budgetData } = budget;
             const newBudget = await tx.budget.create({
               data: {
                 ...budgetData,
@@ -413,7 +413,12 @@ export class BackupService {
                 userId,
                 id: oldId, // Budget uses UUID string, can usually preserve
                 customerId: customerId && customerMap.has(customerId) ? customerMap.get(customerId) : null,
+                expirationDate: expirationDate ? ensureDate(expirationDate) : null,
+                deposit: deposit ? parseFloat(String(deposit)) : null,
+                remaining: remaining ? parseFloat(String(remaining)) : null,
                 date: ensureDate(date),
+                createdAt: ensureDate(createdAt),
+                updatedAt: ensureDate(updatedAt),
               },
             });
             budgetMap.set(oldId, newBudget.id);
