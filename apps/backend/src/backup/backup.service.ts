@@ -126,6 +126,65 @@ export class BackupService {
           await tx.notification.deleteMany({ where: { userId } });
 
           const ensureDate = (d: any) => (d ? new Date(d) : null);
+          
+          const normalizeRubro = (r: any): any => {
+            if (!r) return undefined;
+            const s = String(r).toLowerCase().trim();
+            if (s === 'comercio') return 'comercio';
+            if (s === 'indumentaria') return 'indumentaria';
+            if (s.includes('todos')) return 'Todos_los_rubros';
+            return 'comercio';
+          };
+
+          const normalizePaymentMethod = (m: any): any => {
+            if (!m) return 'EFECTIVO';
+            const s = String(m).toUpperCase().trim();
+            const valid = ['EFECTIVO', 'TRANSFERENCIA', 'TARJETA', 'CHEQUE', 'CUENTA_CORRIENTE', 'CREDITO_CUOTAS'];
+            if (valid.includes(s)) return s;
+            if (s === 'CASH') return 'EFECTIVO';
+            if (s === 'TRANSFER') return 'TRANSFERENCIA';
+            if (s === 'CARD') return 'TARJETA';
+            return 'EFECTIVO';
+          };
+
+          const normalizeUnit = (u: any): any => {
+            if (!u) return 'Unid';
+            const s = String(u).trim();
+            const units = ['General', 'A', 'Bulto', 'Cajon', 'Caja', 'Ciento', 'Cm', 'Docena', 'Gr', 'Kg', 'L', 'M', 'M2', 'M3', 'Ml', 'Mm', 'Pulg', 'Ton', 'Unid', 'V', 'W'];
+            const found = units.find(val => val.toLowerCase() === s.toLowerCase());
+            return found || 'Unid';
+          };
+
+          const normalizeMovementType = (t: any): any => {
+            if (!t) return 'INGRESO';
+            const s = String(t).toUpperCase().trim();
+            if (s === 'INGRESO' || s === 'EGRESO' || s === 'TODOS') return s;
+            return 'INGRESO';
+          };
+
+          const normalizePromotionType = (t: any): any => {
+            if (!t) return 'PERCENTAGE_DISCOUNT';
+            const s = String(t).toUpperCase().trim();
+            if (s === 'PERCENTAGE_DISCOUNT' || s === 'FIXED_DISCOUNT') return s;
+            if (s.includes('PERCENTAGE')) return 'PERCENTAGE_DISCOUNT';
+            if (s.includes('FIXED')) return 'FIXED_DISCOUNT';
+            return 'PERCENTAGE_DISCOUNT';
+          };
+
+          const normalizePromotionStatus = (s: any): any => {
+            if (!s) return 'active';
+            const val = String(s).toLowerCase().trim();
+            if (val === 'active' || val === 'inactive') return val;
+            return 'active';
+          };
+
+          const normalizeNotificationType = (t: any): any => {
+            if (!t) return 'system';
+            const s = String(t).toLowerCase().trim();
+            if (s === 'system' || s === 'update' || s === 'alert' || s === 'message') return s;
+            return 'system';
+          };
+
           const getList = (key: string) => {
             if (Array.isArray(data[key])) return data[key];
             if (Array.isArray(data[key + 's'])) return data[key + 's'];
@@ -162,34 +221,45 @@ export class BackupService {
 
           // Customers
           for (const c of getList('customer')) {
-            const { id: oldId, userId: _, ...rest } = c;
+            const { id: oldId, userId: _, rubro, ...rest } = c;
             // Ensure id is a string and preserved if possible (Customer uses String @id)
-            const newCustomer = await tx.customer.create({ data: { ...rest, id: String(oldId), userId } });
+            const newCustomer = await tx.customer.create({ 
+              data: { ...rest, rubro: normalizeRubro(rubro), id: String(oldId), userId } 
+            });
             customerMap.set(oldId, newCustomer.id);
           }
 
           // Suppliers
           for (const s of getList('supplier')) {
-            const { id: oldId, userId: _, createdAt, updatedAt, ...rest } = s;
+            const { id: oldId, userId: _, createdAt, updatedAt, rubro, ...rest } = s;
             const newSupplier = await tx.supplier.create({ 
-              data: { ...rest, userId, createdAt: ensureDate(createdAt), updatedAt: ensureDate(updatedAt) } 
+              data: { ...rest, rubro: normalizeRubro(rubro), userId, createdAt: ensureDate(createdAt), updatedAt: ensureDate(updatedAt) } 
             });
             supplierMap.set(oldId, newSupplier.id);
           }
 
           // Products
           for (const p of getList('product')) {
-            const { id: oldId, userId: _, createdAt, updatedAt, ...rest } = p;
+            const { id: oldId, userId: _, createdAt, updatedAt, rubro, unit, ...rest } = p;
             const newProduct = await tx.product.create({ 
-              data: { ...rest, userId, createdAt: ensureDate(createdAt), updatedAt: ensureDate(updatedAt) } 
+              data: { 
+                ...rest, 
+                rubro: normalizeRubro(rubro),
+                unit: normalizeUnit(unit),
+                userId, 
+                createdAt: ensureDate(createdAt), 
+                updatedAt: ensureDate(updatedAt) 
+              } 
             });
             productMap.set(oldId, newProduct.id);
           }
 
           // Price Lists
           for (const pl of getList('priceList')) {
-            const { id: oldId, userId: _, ...rest } = pl;
-            const newPL = await tx.priceList.create({ data: { ...rest, userId } });
+            const { id: oldId, userId: _, rubro, ...rest } = pl;
+            const newPL = await tx.priceList.create({ 
+              data: { ...rest, rubro: normalizeRubro(rubro), userId } 
+            });
             priceListMap.set(oldId, newPL.id);
           }
 
@@ -207,16 +277,19 @@ export class BackupService {
 
           // Custom Categories
           for (const cc of getList('customCategory')) {
-            const { id, userId: _, ...rest } = cc;
-            await tx.customCategory.create({ data: { ...rest, userId } });
+            const { id, userId: _, rubro, ...rest } = cc;
+            await tx.customCategory.create({ 
+              data: { ...rest, rubro: normalizeRubro(rubro), userId } 
+            });
           }
 
           // Sales & Related
           for (const sale of getList('sale')) {
-            const { items, installments, id, createdAt, updatedAt, date, customerId, priceListId, ...saleData } = sale;
+            const { items, installments, id, createdAt, updatedAt, date, customerId, priceListId, rubro, ...saleData } = sale;
             const newSale = await tx.sale.create({
               data: {
                 ...saleData,
+                rubro: normalizeRubro(rubro),
                 userId,
                 customerId: customerId ? (customerMap.get(customerId) || String(customerId)) : null,
                 priceListId: priceListId ? priceListMap.get(priceListId) : null,
@@ -229,10 +302,12 @@ export class BackupService {
 
             if (items) {
               for (const item of items) {
-                const { id: itemId, productId, ...itemRest } = item;
+                const { id: itemId, productId, rubro, unit, ...itemRest } = item;
                 await tx.saleItem.create({
                   data: {
                     ...itemRest,
+                    rubro: normalizeRubro(rubro),
+                    unit: normalizeUnit(unit),
                     saleId: newSale.id,
                     productId: productMap.get(productId) || productId, // Fallback to original if mapping fails
                   }
@@ -242,10 +317,11 @@ export class BackupService {
 
             if (installments) {
               for (const inst of installments) {
-                const { id: instId, dueDate, paymentDate, createdAt, updatedAt, ...instRest } = inst;
+                const { id: instId, dueDate, paymentDate, createdAt, updatedAt, paymentMethod, ...instRest } = inst;
                 await tx.installment.create({
                   data: {
                     ...instRest,
+                    paymentMethod: normalizePaymentMethod(paymentMethod),
                     creditSaleId: newSale.id,
                     dueDate: ensureDate(dueDate),
                     paymentDate: ensureDate(paymentDate),
@@ -259,12 +335,13 @@ export class BackupService {
 
           // Payments
           for (const p of getList('payment')) {
-            const { id: oldId, saleId, customerId, date, createdAt, updatedAt, ...rest } = p;
+            const { id: oldId, saleId, customerId, date, createdAt, updatedAt, method, ...rest } = p;
             const newSaleId = saleMap.get(saleId);
             if (newSaleId) {
               const newPayment = await tx.payment.create({
                 data: {
                   ...rest,
+                  method: normalizePaymentMethod(method),
                   saleId: newSaleId,
                   customerId: customerId ? (customerMap.get(customerId) || String(customerId)) : null,
                   date: ensureDate(date),
@@ -293,10 +370,15 @@ export class BackupService {
 
             if (movements) {
               for (const m of movements) {
-                const { id, date, createdAt, timestamp, paymentId, productId, customerId, ...mRest } = m;
+                const { id, date, createdAt, timestamp, paymentId, productId, customerId, rubro, unit, method, paymentMethod, type, ...mRest } = m;
                 await tx.dailyCashMovement.create({
                   data: {
                     ...mRest,
+                    rubro: normalizeRubro(rubro),
+                    unit: normalizeUnit(unit),
+                    method: normalizePaymentMethod(method),
+                    paymentMethod: normalizePaymentMethod(paymentMethod),
+                    type: normalizeMovementType(type),
                     dailyCashId: newCash.id,
                     productId: productId ? productMap.get(productId) : null,
                     customerId: customerId ? (customerMap.get(customerId) || String(customerId)) : null,
@@ -312,10 +394,11 @@ export class BackupService {
 
           // Budgets
           for (const budget of getList('budget')) {
-            const { items, id: oldId, date, customerId, ...budgetData } = budget;
+            const { items, id: oldId, date, customerId, rubro, ...budgetData } = budget;
             const newBudget = await tx.budget.create({
               data: {
                 ...budgetData,
+                rubro: normalizeRubro(rubro),
                 userId,
                 id: oldId, // Budget uses UUID string, can usually preserve
                 customerId: customerId ? (customerMap.get(customerId) || String(customerId)) : null,
@@ -326,10 +409,12 @@ export class BackupService {
 
             if (items) {
               for (const item of items) {
-                const { id, productId, ...itRest } = item;
+                const { id, productId, rubro, unit, ...itRest } = item;
                 await tx.budgetItem.create({
                   data: {
                     ...itRest,
+                    rubro: normalizeRubro(rubro),
+                    unit: normalizeUnit(unit),
                     budgetId: newBudget.id,
                     productId: productId ? productMap.get(productId) : null,
                   }
@@ -340,15 +425,25 @@ export class BackupService {
 
           // Other simple models
           for (const ec of getList('expenseCategory')) {
-            const { id, userId: _, ...rest } = ec;
-            await tx.expenseCategory.create({ data: { ...rest, userId } });
+            const { id, userId: _, rubro, type, ...rest } = ec;
+            await tx.expenseCategory.create({ 
+              data: { 
+                ...rest, 
+                rubro: normalizeRubro(rubro),
+                type: normalizeMovementType(type),
+                userId 
+              } 
+            });
           }
 
           for (const e of getList('expense')) {
-            const { id, date, createdAt, updatedAt, userId: _, ...rest } = e;
+            const { id, date, createdAt, updatedAt, userId: _, rubro, paymentMethod, type, ...rest } = e;
             await tx.expense.create({
               data: {
                 ...rest,
+                rubro: normalizeRubro(rubro),
+                paymentMethod: normalizePaymentMethod(paymentMethod),
+                type: normalizeMovementType(type),
                 userId,
                 date: ensureDate(date),
                 createdAt: ensureDate(createdAt),
@@ -358,8 +453,15 @@ export class BackupService {
           }
 
           for (const promo of getList('promotion')) {
-            const { id, userId: _, ...rest } = promo;
-            await tx.promotion.create({ data: { ...rest, userId } });
+            const { id, userId: _, type, status, ...rest } = promo;
+            await tx.promotion.create({ 
+              data: { 
+                ...rest, 
+                type: normalizePromotionType(type),
+                status: normalizePromotionStatus(status),
+                userId 
+              } 
+            });
           }
 
           for (const note of getList('note')) {
@@ -375,8 +477,14 @@ export class BackupService {
           }
 
           for (const n of getList('notification')) {
-            const { id, userId: _, ...rest } = n;
-            await tx.notification.create({ data: { ...rest, userId } });
+            const { id, userId: _, type, ...rest } = n;
+            await tx.notification.create({ 
+              data: { 
+                ...rest, 
+                type: normalizeNotificationType(type),
+                userId 
+              } 
+            });
           }
 
           for (const sp of getList('supplierProduct')) {
@@ -389,11 +497,17 @@ export class BackupService {
           }
 
           for (const ret of getList('productReturn')) {
-            const { id, productId, date, ...rest } = ret;
+            const { id, productId, date, rubro, unit, ...rest } = ret;
             const newProdId = productMap.get(productId);
             if (newProdId) {
               await tx.productReturn.create({ 
-                data: { ...rest, productId: newProdId, date: ensureDate(date) } 
+                data: { 
+                  ...rest, 
+                  rubro: normalizeRubro(rubro),
+                  unit: normalizeUnit(unit),
+                  productId: newProdId, 
+                  date: ensureDate(date) 
+                } 
               });
             }
           }
