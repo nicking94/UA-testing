@@ -157,25 +157,8 @@ const ClientesPage = () => {
         const sortedCustomers = [...fetchedCustomers].sort((a, b) =>
           a.name.localeCompare(b.name)
         );
-        const searched = searchQuery
-          ? sortedCustomers.filter(
-              (customer) =>
-                customer.name
-                  .toLowerCase()
-                  .includes(searchQuery.toLowerCase()) ||
-                customer.phone
-                  ?.toLowerCase()
-                  .includes(searchQuery.toLowerCase()) ||
-                customer.email
-                  ?.toLowerCase()
-                  .includes(searchQuery.toLowerCase()) ||
-                customer.cuitDni
-                  ?.toLowerCase()
-                  .includes(searchQuery.toLowerCase())
-            )
-          : sortedCustomers;
         setCustomers(sortedCustomers);
-        setFilteredCustomers(searched);
+        setFilteredCustomers(sortedCustomers);
       } catch (error) {
         console.error("Error al cargar clientes:", error);
         showNotification("Error al cargar clientes", "error");

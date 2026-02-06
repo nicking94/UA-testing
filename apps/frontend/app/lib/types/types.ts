@@ -276,7 +276,7 @@ export type Option = {
 export type ProductOption = {
   value: number;
   label: string;
-  product: Product;
+  product?: Product;
   isDisabled?: boolean;
 };
 export type PaymentMethod =

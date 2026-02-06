@@ -213,10 +213,10 @@ const useProducts = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const fetchProducts = useCallback(async () => {
+  const fetchProducts = useCallback(async (filters?: { rubro?: string; search?: string }) => {
     setLoading(true);
     try {
-      const storedProducts = await productsApi.getAll();
+      const storedProducts = await productsApi.getAll(filters);
       const formattedProducts = storedProducts
         .map((p: Product) => ({
           ...p,
@@ -299,26 +299,16 @@ const useSortedProducts = (
   products: Product[],
   filters: UnifiedFilter[],
   sortConfig: { field: keyof Product; direction: "asc" | "desc" },
-  rubro: Rubro,
-  searchQuery: string,
 ) => {
   return useMemo(() => {
     let filtered = [...products];
 
-    if (rubro !== "Todos los rubros") {
-      filtered = filtered.filter((product) => product.rubro === rubro);
-    }
+    // Server-side filtering handles rubro and search query now.
+    // We only keep client-side filtering for advanced filters that might not be fully supported by API yet
+    // or if we want to filter the already fetched subset.
 
-    if (searchQuery) {
-      filtered = filtered.filter((product) => {
-        const productName = getDisplayProductName(
-          product,
-          rubro,
-          false,
-        ).toLowerCase();
-        return productName.includes(searchQuery.toLowerCase());
-      });
-    }
+    // Note: We intentionally removed the rubro and searchQuery filters here
+    // because they are now handled by the API in fetchProducts.
 
     if (filters.length > 0) {
       filtered = filtered.filter((product) => {
@@ -392,7 +382,7 @@ const useSortedProducts = (
     });
 
     return filtered;
-  }, [products, rubro, searchQuery, filters, sortConfig]);
+  }, [products, filters, sortConfig]);
 };
 
 const getRowStyles = (expirationStatus: string, hasLowStock: boolean) => {
@@ -2165,8 +2155,6 @@ const ProductsPage = () => {
     products,
     filters,
     sortConfig,
-    rubro,
-    debouncedSearchQuery,
   );
 
   const indexOfLastProduct = currentPage * itemsPerPage;
@@ -2244,7 +2232,10 @@ const ProductsPage = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        await fetchProducts();
+        await fetchProducts({
+          rubro: rubro === "Todos los rubros" ? undefined : rubro,
+          search: debouncedSearchQuery,
+        });
         const storedReturns = await productReturnsApi.getAll();
         setReturns(
           storedReturns.map((r) => ({
@@ -2260,7 +2251,7 @@ const ProductsPage = () => {
     };
 
     fetchData();
-  }, [fetchProducts, loadCustomCategories, showNotification]);
+  }, [fetchProducts, loadCustomCategories, showNotification, rubro, debouncedSearchQuery]);
 
   useEffect(() => {
     const fetchCategories = async () => {

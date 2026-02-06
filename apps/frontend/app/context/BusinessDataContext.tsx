@@ -1,1 +1,78 @@
-"use client";import { createContext, useContext, useState, useEffect } from "react";import { BusinessData } from "../lib/types/types";import { businessDataApi } from "../lib/api/business-data";const BUSINESS_DATA_KEY = "businessData";type BusinessDataContextType = {  businessData: BusinessData;  setBusinessData: (data: BusinessData) => Promise<void>;  loadBusinessData: () => Promise<void>;};const BusinessDataContext = createContext<BusinessDataContextType | undefined>(  undefined);const defaultBusinessData: BusinessData = {  id: 1,  name: "Universal App",  address: "Calle falsa 123",  phone: "123456789",  cuit: "12-34567890-1",};export const BusinessDataProvider = ({  children,}: {  children: React.ReactNode;}) => {  const [businessData, setBusinessDataState] = useState<BusinessData>(defaultBusinessData);  const loadBusinessData = async () => {    try {      const apiData = await businessDataApi.get();      if (apiData) {        setBusinessDataState(apiData);      } else {        try {          const createdData = await businessDataApi.create(defaultBusinessData);          setBusinessDataState(createdData);        } catch (error) {          console.error("Error creating default business data:", error);          setBusinessDataState(defaultBusinessData);        }      }    } catch (error) {      console.error("Error al cargar datos del negocio desde API:", error);      if (typeof window !== "undefined") {        const stored = localStorage.getItem(BUSINESS_DATA_KEY);        if (stored) {          setBusinessDataState(JSON.parse(stored));        }      }    }  };  const setBusinessData = async (newData: BusinessData) => {    try {      let updatedData: BusinessData;      if (newData.id) {        updatedData = await businessDataApi.update(newData.id, newData);      } else {        updatedData = await businessDataApi.create(newData);      }      setBusinessDataState(updatedData);      if (typeof window !== "undefined") {        localStorage.setItem(BUSINESS_DATA_KEY, JSON.stringify(updatedData));      }    } catch (error) {      console.error("Error al guardar datos del negocio en API:", error);      throw error;    }  };  useEffect(() => {    loadBusinessData();  }, []);  return (    <BusinessDataContext.Provider      value={{ businessData, setBusinessData, loadBusinessData }}    >      {children}    </BusinessDataContext.Provider>  );};export const useBusinessData = () => {  const context = useContext(BusinessDataContext);  if (!context) {    throw new Error(      "useBusinessData debe usarse dentro de un BusinessDataProvider"    );  }  return context;};
+"use client";
+import { createContext, useContext, useState, useEffect } from "react";
+import { BusinessData } from "../lib/types/types";
+import { businessDataApi } from "../lib/api/business-data";
+
+type BusinessDataContextType = {
+  businessData: BusinessData | null;
+  setBusinessData: (data: BusinessData) => Promise<void>;
+  isLoading: boolean;
+  loadBusinessData: () => Promise<void>;
+};
+
+const BusinessDataContext = createContext<BusinessDataContextType | undefined>(
+  undefined
+);
+
+export const BusinessDataProvider = ({
+  children,
+}: {
+  children: React.ReactNode;
+}) => {
+  const [businessData, setBusinessDataState] = useState<BusinessData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const loadBusinessData = async () => {
+    setIsLoading(true);
+    try {
+      const apiData = await businessDataApi.get();
+      if (apiData) {
+        setBusinessDataState(apiData);
+      }
+      // If no data exists, we leave it as null. The UI should handle the "no business data" state,
+      // or the backend should ensure default data exists upon creation.
+    } catch (error) {
+      console.error("Error al cargar datos del negocio desde API:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const setBusinessData = async (newData: BusinessData) => {
+    try {
+      let updatedData: BusinessData;
+      // If we have an ID, update. Otherwise, create.
+      if (newData.id) {
+        updatedData = await businessDataApi.update(newData.id, newData);
+      } else {
+        updatedData = await businessDataApi.create(newData);
+      }
+      setBusinessDataState(updatedData);
+    } catch (error) {
+      console.error("Error al guardar datos del negocio en API:", error);
+      throw error;
+    }
+  };
+
+  useEffect(() => {
+    loadBusinessData();
+  }, []);
+
+  return (
+    <BusinessDataContext.Provider
+      value={{ businessData, setBusinessData, isLoading, loadBusinessData }}
+    >
+      {children}
+    </BusinessDataContext.Provider>
+  );
+};
+
+export const useBusinessData = () => {
+  const context = useContext(BusinessDataContext);
+  if (!context) {
+    throw new Error(
+      "useBusinessData debe usarse dentro de un BusinessDataProvider"
+    );
+  }
+  return context;
+};

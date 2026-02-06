@@ -8,10 +8,10 @@ import {
   Checkbox,
   Popper,
   IconButton,
+  CircularProgress,
 } from "@mui/material";
 import { CheckBoxOutlineBlank, CheckBox, Close } from "@mui/icons-material";
 import {
-  SyntheticEvent,
   useMemo,
   useState,
   useCallback,
@@ -24,10 +24,10 @@ import getDisplayProductName from "@/app/lib/utils/DisplayProductName";
 import { productPricesApi } from "@/app/lib/api/product-prices";
 
 interface ProductSearchAutocompleteProps {
-  products: Product[];
+  fetchProducts: (query: string) => Promise<Product[]>;
   selectedProducts: ProductOption[];
   onProductSelect: (selectedOptions: ProductOption[]) => void;
-  onSearchChange: (query: string) => void;
+  onSearchChange?: (query: string) => void;
   rubro: Rubro;
   selectedPriceListId?: number | null; 
   disabled?: boolean;
@@ -36,7 +36,7 @@ interface ProductSearchAutocompleteProps {
 }
 
 const ProductSearchAutocomplete = ({
-  products,
+  fetchProducts,
   selectedProducts,
   onProductSelect,
   onSearchChange,
@@ -46,147 +46,96 @@ const ProductSearchAutocomplete = ({
   placeholder = "Seleccionar productos",
   maxDisplayed = 50,
 }: ProductSearchAutocompleteProps) => {
-  const [searchQuery, setSearchQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [options, setOptions] = useState<ProductOption[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [inputValue, setInputValue] = useState("");
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const [productsWithCurrentPrices, setProductsWithCurrentPrices] =
-    useState<Product[]>(products);
 
   const icon = useMemo(() => <CheckBoxOutlineBlank fontSize="small" />, []);
   const checkedIcon = useMemo(() => <CheckBox fontSize="small" />, []);
 
-  useEffect(() => {
-    const updateProductPrices = async () => {
-      if (products.length === 0) {
-        setProductsWithCurrentPrices([]);
-        return;
-      }
-
-      if (!selectedPriceListId) {
-        setProductsWithCurrentPrices(
-          products.map((p) => ({ ...p, currentPrice: p.price }))
-        );
-        return;
-      }
-
+  const loadOptions = useCallback(
+    async (query: string) => {
+      setLoading(true);
       try {
-        const prices = await productPricesApi.getAll({
-          priceListId: selectedPriceListId,
-          isActive: true,
-        });
+        let products = await fetchProducts(query);
 
-        const priceMap = new Map(prices.map((pp) => [pp.productId, pp.price]));
+        // Filter by rubro client-side as safety, though API should handle it
+        if (rubro !== "Todos los rubros") {
+          products = products.filter((p) => p.rubro === rubro);
+        }
 
-        const updatedProducts = products.map((product) => {
-          const listPrice = priceMap.get(product.id);
-          const currentPrice =
-            listPrice !== undefined ? listPrice : product.price;
+        if (selectedPriceListId && products.length > 0) {
+          try {
+            const prices = await productPricesApi.getAll({
+              priceListId: selectedPriceListId,
+              isActive: true,
+            });
+
+            const priceMap = new Map(prices.map((pp) => [pp.productId, pp.price]));
+
+            products = products.map((product) => {
+              const listPrice = priceMap.get(product.id);
+              const currentPrice =
+                listPrice !== undefined ? listPrice : product.price;
+
+              return {
+                ...product,
+                price: currentPrice,
+                currentPrice: currentPrice,
+              };
+            });
+          } catch (error) {
+            console.error("Error fetching product prices:", error);
+            // Fallback to base prices
+            products = products.map((p) => ({ ...p, currentPrice: p.price }));
+          }
+        } else {
+             products = products.map((p) => ({ ...p, currentPrice: p.price }));
+        }
+
+        const newOptions = products.slice(0, maxDisplayed).map((p) => {
+          const stock = Number(p.stock);
+          const isValidStock = !isNaN(stock);
+          const displayName = getDisplayProductName(p, rubro, true);
 
           return {
-            ...product,
-            price: currentPrice,
-            currentPrice: currentPrice,
-          };
+            value: p.id,
+            label:
+              isValidStock && stock > 0
+                ? displayName
+                : `${displayName} (agotado)`,
+            product: p,
+            isDisabled: !isValidStock || stock <= 0,
+          } as ProductOption;
         });
 
-        setProductsWithCurrentPrices(updatedProducts);
+        setOptions(newOptions);
       } catch (error) {
-        console.error("Error fetching product prices:", error);
-        setProductsWithCurrentPrices(
-          products.map((p) => ({ ...p, currentPrice: p.price }))
-        );
+        console.error("Error loading options:", error);
+        setOptions([]);
+      } finally {
+        setLoading(false);
       }
+    },
+    [fetchProducts, rubro, selectedPriceListId, maxDisplayed]
+  );
+
+  useEffect(() => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    searchTimeoutRef.current = setTimeout(() => {
+        loadOptions(inputValue);
+        if (onSearchChange) onSearchChange(inputValue);
+    }, 400);
+
+    return () => {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     };
-
-    updateProductPrices();
-  }, [products, selectedPriceListId]);
-
-  const productOptions = useMemo(() => {
-    return productsWithCurrentPrices
-      .filter((p) => rubro === "Todos los rubros" || p.rubro === rubro)
-      .map((p) => {
-        const stock = Number(p.stock);
-        const isValidStock = !isNaN(stock);
-        const displayName = getDisplayProductName(
-          {
-            name: p.name,
-            size: p.size,
-            color: p.color,
-            rubro: p.rubro,
-            lot: p.lot,
-          },
-          rubro,
-          true
-        );
-
-        return {
-          value: p.id,
-          label:
-            isValidStock && stock > 0
-              ? displayName
-              : `${displayName} (agotado)`,
-          product: p,
-          isDisabled: !isValidStock || stock <= 0,
-        } as ProductOption;
-      });
-  }, [productsWithCurrentPrices, rubro]);
-
-  const filteredProductOptions = useMemo(() => {
-    if (!searchQuery) return productOptions.slice(0, maxDisplayed);
-    const query = searchQuery.toLowerCase();
-    return productOptions
-      .filter((option) => {
-        const productName = option.product?.name.toLowerCase() || "";
-        const label = option.label.toLowerCase();
-        const size = option.product?.size?.toLowerCase() || "";
-        const color = option.product?.color?.toLowerCase() || "";
-        const rubroText = option.product?.rubro?.toLowerCase() || "";
-        const lot = option.product?.lot?.toLowerCase() || "";
-
-        return (
-          label.includes(query) ||
-          productName.includes(query) ||
-          size.includes(query) ||
-          color.includes(query) ||
-          rubroText.includes(query) ||
-          lot.includes(query)
-        );
-      })
-      .slice(0, maxDisplayed);
-  }, [productOptions, searchQuery, maxDisplayed]);
-
-  const getOptionLabel = useCallback(
-    (option: ProductOption) => {
-      return getDisplayProductName(
-        {
-          name: option.product?.name || option.label,
-          size: option.product?.size,
-          color: option.product?.color,
-          rubro: option.product?.rubro,
-          lot: option.product?.lot,
-        },
-        rubro,
-        true
-      );
-    },
-    [rubro]
-  );
-
-  const getOptionDisabled = (option: ProductOption): boolean => {
-    return option.isDisabled || false;
-  };
-
-  const handleInputChange = useCallback(
-    (event: SyntheticEvent, value: string) => {
-      if (searchTimeoutRef.current) {
-        clearTimeout(searchTimeoutRef.current);
-      }
-      searchTimeoutRef.current = setTimeout(() => {
-        setSearchQuery(value);
-        onSearchChange(value);
-      }, 200);
-    },
-    [onSearchChange]
-  );
+  }, [inputValue, loadOptions, onSearchChange]);
 
   const handleRemoveProduct = useCallback(
     (productToRemove: ProductOption) => {
@@ -198,18 +147,32 @@ const ProductSearchAutocomplete = ({
     [selectedProducts, onProductSelect]
   );
 
+  const getOptionDisabled = (option: ProductOption): boolean => {
+    return option.isDisabled || false;
+  };
+
   return (
     <Autocomplete
       multiple
-      options={filteredProductOptions}
-      getOptionLabel={getOptionLabel}
+      open={open}
+      onOpen={() => {
+        setOpen(true);
+        if (options.length === 0) loadOptions("");
+      }}
+      onClose={() => setOpen(false)}
+      options={options}
+      getOptionLabel={(option) => option.label}
       getOptionDisabled={getOptionDisabled}
       value={selectedProducts}
       onChange={(event, newValue) => {
         onProductSelect(newValue);
       }}
-      onInputChange={handleInputChange}
+      inputValue={inputValue}
+      onInputChange={(event, newInputValue) => {
+        setInputValue(newInputValue);
+      }}
       disabled={disabled}
+      filterOptions={(x) => x} // Disable client-side filtering
       renderInput={(params) => (
         <TextField
           {...params}
@@ -217,6 +180,15 @@ const ProductSearchAutocomplete = ({
           variant="outlined"
           size="small"
           fullWidth
+          InputProps={{
+            ...params.InputProps,
+            endAdornment: (
+              <>
+                {loading ? <CircularProgress color="inherit" size={20} /> : null}
+                {params.InputProps.endAdornment}
+              </>
+            ),
+          }}
         />
       )}
       renderTags={(value, getTagProps) =>
@@ -276,7 +248,6 @@ const ProductSearchAutocomplete = ({
       }
       isOptionEqualToValue={(option, value) => option.value === value.value}
       disableCloseOnSelect
-      filterOptions={(options) => options}
       renderOption={({ key, ...props }, option, { selected }) => (
         <li key={key} {...props}>
           <Checkbox
@@ -318,8 +289,8 @@ const ProductSearchAutocomplete = ({
           </Box>
         </li>
       )}
-      noOptionsText="No se encontraron productos"
-      loading={products.length === 0}
+      noOptionsText={loading ? "Buscando..." : "No se encontraron productos"}
+      loading={loading}
       loadingText="Cargando productos..."
       PopperComponent={(props) => (
         <Popper {...props} placement="bottom-start" style={{ zIndex: 1300 }} />

@@ -75,6 +75,7 @@ import CustomChip from "@/app/components/CustomChip";
 import getDisplayProductName from "@/app/lib/utils/DisplayProductName";
 import ProductSearchAutocomplete from "@/app/components/ProductSearchAutocomplete";
 import CustomGlobalTooltip from "@/app/components/CustomTooltipGlobal";
+import { productsApi } from "@/app/lib/api/products";
 interface CustomerOption {
   value: string;
   label: string;
@@ -132,6 +133,10 @@ const CONVERSION_FACTORS: ConversionFactors = {
   V: { base: "V", factor: 1 },
   W: { base: "W", factor: 1 },
 };
+interface ProductFilters {
+    search?: string;
+    rubro?: string;
+}
 const PresupuestosPage = () => {
   const { rubro } = useRubro();
   const { businessData } = useBusinessData();
@@ -141,7 +146,6 @@ const PresupuestosPage = () => {
     updateBudget,
     deleteBudget,
   } = useBudgetsApi();
-  const { fetchProducts: fetchProductsApi } = useProductsApi();
   const { fetchCustomers: fetchCustomersApi } = useCustomersApi();
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [filteredBudgets, setFilteredBudgets] = useState<Budget[]>([]);
@@ -160,7 +164,6 @@ const PresupuestosPage = () => {
   });
   const [isConvertModalOpen, setIsConvertModalOpen] = useState(false);
   const [budgetToConvert, setBudgetToConvert] = useState<Budget | null>(null);
-  const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerOptions, setCustomerOptions] = useState<CustomerOption[]>([]);
   const [selectedCustomer, setSelectedCustomer] =
@@ -244,23 +247,26 @@ const PresupuestosPage = () => {
         return optionInfo?.base === productUnitInfo.base;
       });
     },
-    []
+    [unitOptions]
   );
-  useEffect(() => {
-    const loadProducts = async () => {
+
+  const fetchProductOptions = useCallback(
+    async (query: string) => {
       try {
-        const filters: CustomerFilters = {};
-        if (rubro && rubro !== "Todos los rubros") {
-          filters.rubro = rubro;
-        }
-        const storedProducts = await fetchProductsApi(filters);
-        setProducts(storedProducts);
+        const filters: ProductFilters = {
+          search: query,
+          rubro: rubro === "Todos los rubros" ? undefined : rubro,
+        };
+        const results = await productsApi.getAll(filters);
+        return results;
       } catch (error) {
-        console.error("Error al cargar productos:", error);
+        console.error("Error searching products:", error);
+        return [];
       }
-    };
-    loadProducts();
-  }, [rubro, fetchProductsApi]);
+    },
+    [rubro]
+  );
+  /* product loading useEffect removed */
   useEffect(() => {
     const loadCustomers = async () => {
       try {
@@ -461,20 +467,11 @@ const PresupuestosPage = () => {
   const handleQuantityChange = useCallback(
     (productId: number, quantity: number, unit: Product["unit"]) => {
       setNewBudget((prevState) => {
-        const product = products.find((p) => p.id === productId);
+        const product = prevState.items.find((p) => p.productId === productId);
         if (!product) return prevState;
-        const stockCheck = checkStockAvailability(product, quantity, unit);
-        if (!stockCheck.available) {
-          showNotification(
-            `No hay suficiente stock para ${
-              product.name
-            }. Stock disponible: ${stockCheck.availableQuantity.toFixed(2)} ${
-              stockCheck.availableUnit
-            }`,
-            "error"
-          );
-          return prevState;
-        }
+        
+        // For budgets, we don't enforce strict stock validation
+        // Stock is checked at conversion to sale time
         const updatedItems = prevState.items.map((item) => {
           if (item.productId === productId) {
             const newPrice = product.price;
@@ -500,12 +497,7 @@ const PresupuestosPage = () => {
         };
       });
     },
-    [
-      products,
-      checkStockAvailability,
-      showNotification,
-      calculateTotalAndRemaining,
-    ]
+    [calculateTotalAndRemaining]
   );
   const handleUnitChange = useCallback(
     (
@@ -517,9 +509,8 @@ const PresupuestosPage = () => {
       setNewBudget((prev) => {
         const updatedItems = prev.items.map((item) => {
           if (item.productId === productId) {
-            const product = products.find((p) => p.id === productId);
-            if (!product) return item;
-            const compatibleUnits = getCompatibleUnits(product.unit);
+            // Use item's current unit as reference for compatibility
+            const compatibleUnits = getCompatibleUnits(item.unit);
             const isCompatible = compatibleUnits.some(
               (u) => u.value === selectedOption.value
             );
@@ -527,7 +518,7 @@ const PresupuestosPage = () => {
             const newUnit = selectedOption.value as Product["unit"];
             const basePrice =
               item.basePrice ||
-              product.price / convertToBaseUnit(1, product.unit);
+              item.price / convertToBaseUnit(1, item.unit);
             const newPrice = basePrice * convertToBaseUnit(1, newUnit);
             const newQuantity = convertUnit(
               currentQuantity,
@@ -552,7 +543,6 @@ const PresupuestosPage = () => {
       });
     },
     [
-      products,
       getCompatibleUnits,
       convertToBaseUnit,
       convertUnit,
@@ -741,8 +731,7 @@ const PresupuestosPage = () => {
           ...item,
           basePrice:
             item.basePrice ||
-            (products.find((p) => p.id === item.productId)?.price || 0) /
-              convertToBaseUnit(1, item.unit),
+            item.basePrice || 0,
         })),
         total: budget.total,
         deposit: budget.deposit,
@@ -764,7 +753,7 @@ const PresupuestosPage = () => {
       }
       setIsModalOpen(true);
     },
-    [products, customers, convertToBaseUnit]
+    [customers, convertToBaseUnit]
   );
   const handleUpdateBudget = async () => {
     if (!editingBudget || !newBudget.customerName.trim()) {
@@ -829,7 +818,7 @@ const PresupuestosPage = () => {
                 deposit: budget.deposit || "0",
                 remaining: budget.remaining || budget.total,
               }}
-              businessData={businessData}
+              businessData={businessData || undefined}
             />
           }
           fileName={`Presupuesto de ${budget.customerName} - ${new Date(
@@ -1445,25 +1434,20 @@ const PresupuestosPage = () => {
             <Box>
               <Box sx={{ mb: 2 }}>
                 <ProductSearchAutocomplete
-                  products={products}
                   selectedProducts={newBudget.items.map((item) => {
-                    const product = products.find(
-                      (p) => p.id === item.productId
-                    );
                     return {
                       value: item.productId,
                       label: getDisplayProductName(
                         {
-                          name: product?.name || item.productName,
-                          size: product?.size || item.size,
-                          color: product?.color || item.color,
-                          rubro: product?.rubro || item.rubro,
-                          lot: product?.lot,
+                          name: item.productName,
+                          size: item.size,
+                          color: item.color,
+                          rubro: item.rubro,
+                          lot: undefined,
                         },
                         rubro,
                         true
                       ),
-                      product: product!,
                       isDisabled: false,
                     } as ProductOption;
                   })}
@@ -1476,9 +1460,7 @@ const PresupuestosPage = () => {
                     );
                     const updatedItems = enabledOptions.map((option) => {
                       const existingItem = existingItemsMap.get(option.value);
-                      const product =
-                        option.product ||
-                        products.find((p) => p.id === option.value);
+                      const product = option.product;
                       if (existingItem) {
                         return {
                           ...existingItem,
@@ -1518,11 +1500,12 @@ const PresupuestosPage = () => {
                     }));
                   }}
                   onSearchChange={(query) => {
-                    console.log("Búsqueda de productos:", query);
+                    setSearchQuery(query);
                   }}
                   rubro={rubro}
-                  placeholder="Seleccionar productos"
+                  placeholder="Buscar productos"
                   maxDisplayed={50}
+                  fetchProducts={fetchProductOptions}
                 />
               </Box>
               {newBudget.items.length > 0 && (
@@ -1597,9 +1580,6 @@ const PresupuestosPage = () => {
                         </TableHead>
                         <TableBody>
                           {newBudget.items.map((item) => {
-                            const product = products.find(
-                              (p) => p.id === item.productId
-                            );
                             return (
                               <TableRow key={item.productId}>
                                 <TableCell>
@@ -1608,20 +1588,16 @@ const PresupuestosPage = () => {
                                   {item.color && ` - ${item.color}`}
                                 </TableCell>
                                 <TableCell>
-                                  {product?.unit === "Unid." ? (
+                                  {item.unit === "Unid." ? (
                                     <Typography
-                                      variant="body2"
+                                      variant="body1"
                                       sx={{ textAlign: "center" }}
                                     >
-                                      Unidad
+                                      Unid.
                                     </Typography>
                                   ) : (
                                     <Autocomplete
-                                      options={
-                                        product
-                                          ? getCompatibleUnits(product.unit)
-                                          : []
-                                      }
+                                      options={getCompatibleUnits(item.unit)}
                                       value={unitOptions.find(
                                         (option) => option.value === item.unit
                                       )}
@@ -1629,7 +1605,7 @@ const PresupuestosPage = () => {
                                         event: SyntheticEvent,
                                         newValue: UnitOption | null
                                       ) => {
-                                        if (newValue && product) {
+                                        if (newValue) {
                                           handleUnitChange(
                                             item.productId,
                                             newValue,

@@ -108,7 +108,6 @@ const VentasPage = () => {
   const { fetchProducts: fetchProductsApi } = useProductsApi();
   const theme = useTheme();
   const currentYear = new Date().getFullYear();
-  const [products, setProducts] = useState<Product[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [isOpenModal, setIsOpenModal] = useState(false);
   const [newSale, setNewSale] = useState<Omit<Sale, "id">>({
@@ -289,10 +288,36 @@ const VentasPage = () => {
       label: unit.label,
     }));
   };
+  const fetchProductOptions = useCallback(
+    async (query: string) => {
+      try {
+        const filters = {
+          search: query,
+          rubro: rubro === "Todos los rubros" ? undefined : rubro,
+        };
+        const results = await productsApi.getAll(filters);
+        return results;
+      } catch (error) {
+        console.error("Error searching products:", error);
+        return [];
+      }
+    },
+    [rubro]
+  );
+
   const getProductPrice = async (productId: number): Promise<number> => {
     if (!selectedPriceListId) {
-      const product = products.find((p) => p.id === productId);
-      return product?.price || 0;
+      // Try to find in current sale items first to avoid API call if possible
+      const productInSale = newSale.products.find((p) => p.id === productId);
+      if (productInSale) return productInSale.price;
+      
+      // If not, fetch from API
+      try {
+          const product = await productsApi.getById(productId);
+          return product?.price || 0;
+      } catch {
+          return 0;
+      }
     }
     try {
       const productPrice = await productPricesApi.getByProductAndPriceList(
@@ -302,12 +327,12 @@ const VentasPage = () => {
       if (productPrice) {
         return productPrice.price;
       }
-      const product = products.find((p) => p.id === productId);
+      const product = await productsApi.getById(productId);
       return product?.price || 0;
     } catch (error) {
       console.error("Error getting product price:", error);
-      const product = products.find((p) => p.id === productId);
-      return product?.price || 0;
+      const productInSale = newSale.products.find((p) => p.id === productId);
+      return productInSale?.price || 0;
     }
   };
   const updateProductPrices = async (priceListId: number) => {
@@ -390,21 +415,25 @@ const VentasPage = () => {
       }));
       setOriginalStockBackup(stockBackup);
       for (const product of sale.products) {
-        const originalProduct = products.find((p) => p.id === product.id);
-        if (originalProduct) {
-          const soldInBase = convertToBaseUnit(product.quantity, product.unit);
-          const currentStockInBase = convertToBaseUnit(
-            Number(originalProduct.stock),
-            originalProduct.unit
-          );
-          const newStockInBase = currentStockInBase + soldInBase;
-          const newStock = convertFromBaseUnit(
-            newStockInBase,
-            originalProduct.unit
-          );
-          await productsApi.update(product.id, {
-            stock: parseFloat(newStock.toFixed(3)),
-          });
+        try {
+            const originalProduct = await productsApi.getById(product.id);
+            if (originalProduct) {
+              const soldInBase = convertToBaseUnit(product.quantity, product.unit);
+              const currentStockInBase = convertToBaseUnit(
+                Number(originalProduct.stock),
+                originalProduct.unit
+              );
+              const newStockInBase = currentStockInBase + soldInBase;
+              const newStock = convertFromBaseUnit(
+                newStockInBase,
+                originalProduct.unit
+              );
+              await productsApi.update(product.id, {
+                stock: parseFloat(newStock.toFixed(3)),
+              });
+            }
+        } catch (e) {
+            console.error(`Error restoring stock for product ${product.id}`, e);
         }
       }
       const movementIds: number[] = [];
@@ -459,9 +488,10 @@ const VentasPage = () => {
     }
     try {
       for (const backup of originalStockBackup) {
-        const product = products.find((p) => p.id === backup.id);
-        if (product) {
-          await productsApi.update(backup.id, { stock: backup.originalStock });
+        try {
+            await productsApi.update(backup.id, { stock: backup.originalStock });
+        } catch (e) {
+             console.error(`Error restoring backup stock for ${backup.id}`, e);
         }
       }
       setIsEditMode({ isEditing: false });
@@ -486,8 +516,8 @@ const VentasPage = () => {
       console.error("Error al cancelar edición:", error);
       showNotification("Error al cancelar la edición", "error");
     } finally {
-      const storedProducts = await fetchProductsApi({});
-      setProducts(storedProducts);
+      const storedSales = await fetchSales();
+      setSales(storedSales);
     }
   };
   const updateStockAfterSale = async (
@@ -697,13 +727,14 @@ const VentasPage = () => {
   ): { isValid: boolean; errors: string[] } => {
     const errors: string[] = [];
     for (const product of saleProducts) {
-      const originalProduct = products.find((p) => p.id === product.id);
-      if (!originalProduct) {
-        errors.push(`Producto ${product.name} no encontrado`);
-        continue;
-      }
+      // Use the product data from the sale item itself as it contains the snapshot of stock logic
+      // or if we want to be strict, we can't validate asynchronously here effectively without changing signature.
+      // For now, we assume product.stock in saleProducts is relatively fresh (from autocomplete).
+      // If we wanted to ensure freshness, we would need to make this async or cache it.
+      // Given the refactor, relying on product.stock (which is copied from search result) is the intended path for UI validation.
+      
       const stockCheck = checkStockAvailability(
-        originalProduct,
+        product, // This works because product object has .stock property
         product.quantity,
         product.unit
       );
@@ -1507,6 +1538,24 @@ const VentasPage = () => {
   };
   const handleProductScan = async (productId: number) => {
     const price = await getProductPrice(productId);
+    
+    // We need the product metadata. First check if it's already in the sale
+    // to avoid an extra API call.
+    const existingInSale = newSale.products.find((p) => p.id === productId);
+    let productMetadata: Product | null = existingInSale || null;
+
+    if (!productMetadata) {
+      try {
+        productMetadata = await productsApi.getById(productId);
+      } catch (error) {
+        console.error("Error fetching product metadata:", error);
+        showNotification("Error al obtener información del producto", "error");
+        return;
+      }
+    }
+
+    if (!productMetadata) return;
+
     setNewSale((prevState) => {
       const existingProductIndex = prevState.products.findIndex(
         (p) => p.id === productId
@@ -1530,13 +1579,11 @@ const VentasPage = () => {
           barcode: "",
         };
       } else {
-        const productToAdd = products.find((p) => p.id === productId);
-        if (!productToAdd) return prevState;
         const newProduct = {
-          ...productToAdd,
-          price, 
+          ...productMetadata!,
+          price,
           quantity: 1,
-          unit: productToAdd.unit,
+          unit: productMetadata!.unit,
           discount: 0,
           surcharge: 0,
         };
@@ -1850,7 +1897,7 @@ const VentasPage = () => {
   const handleQuantityChange = useCallback(
     (productId: number, quantity: number, unit: Product["unit"]) => {
       setNewSale((prevState) => {
-        const product = products.find((p) => p.id === productId);
+        const product = prevState.products.find((p) => p.id === productId);
         if (!product) return prevState;
         const stockCheck = checkStockAvailability(product, quantity, unit);
         if (!stockCheck.available) {
@@ -1887,7 +1934,7 @@ const VentasPage = () => {
         };
       });
     },
-    [products, selectedPromotions, showNotification]
+    [selectedPromotions, showNotification]
   );
   const handleUnitChange = useCallback(
     (
@@ -2052,10 +2099,6 @@ const VentasPage = () => {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const storedProducts = await fetchProductsApi({
-          rubro: rubro !== "Todos los rubros" ? rubro : undefined,
-        });
-        setProducts(storedProducts);
         const storedSales = await fetchSales();
         const sortedSales = storedSales.sort(
           (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
@@ -2826,7 +2869,7 @@ const VentasPage = () => {
                   ref={ticketRef}
                   sale={selectedSale}
                   rubro={rubro}
-                  businessData={businessData}
+                  businessData={businessData || undefined}
                 />
               </Box>
             </>
@@ -2965,14 +3008,17 @@ const VentasPage = () => {
                   onChange={(value) =>
                     setNewSale({ ...newSale, barcode: value })
                   }
-                  onScanComplete={(code) => {
-                    const productToAdd = products.find(
-                      (p) => p.barcode === code
-                    );
-                    if (productToAdd) {
-                      handleProductScan(productToAdd.id);
-                    } else {
-                      showNotification("Producto no encontrado", "error");
+                  onScanComplete={async (code) => {
+                    try {
+                      const productToAdd = await productsApi.getByBarcode(code);
+                      if (productToAdd) {
+                        handleProductScan(productToAdd.id);
+                      } else {
+                        showNotification("Producto no encontrado", "error");
+                      }
+                    } catch (error) {
+                      console.error("Error scanning product:", error);
+                      showNotification("Error al buscar el producto", "error");
                     }
                   }}
                 />
@@ -2982,13 +3028,10 @@ const VentasPage = () => {
                   Productos*
                 </Typography>
                 <ProductSearchAutocomplete
-                  products={products}
                   selectedProducts={newSale.products.map((p) => {
-                    const product = products.find((prod) => prod.id === p.id);
                     return {
                       value: p.id,
                       label: getDisplayProductName(p, rubro, true),
-                      product: product!,
                       isDisabled: false,
                     } as ProductOption;
                   })}
@@ -3001,25 +3044,36 @@ const VentasPage = () => {
                         .filter((option) => !option.isDisabled)
                         .map(async (option) => {
                           const existingProduct = existingProductsMap.get(
-                            option.product.id
+                            option.value
                           );
                           if (existingProduct) {
                             return {
                               ...existingProduct,
                             };
                           }
+                          
+                          // If product is missing (shouldn't happen for new selections), fetch it
+                          let productData = option.product;
+                          if (!productData) {
+                            productData = await productsApi.getById(option.value);
+                          }
+                          
+                          if (!productData) {
+                             throw new Error("Product not found");
+                          }
+
                           const price =
-                            option.product.price ||
-                            option.product.currentPrice ||
-                            option.product.basePrice ||
+                            productData.price ||
+                            productData.currentPrice ||
+                            productData.basePrice ||
                             0;
                           return {
-                            ...option.product,
+                            ...productData,
                             price,
                             quantity: 1,
                             discount: 0,
                             surcharge: 0,
-                            unit: option.product.unit || "Unid.",
+                            unit: productData.unit || "Unid.",
                           };
                         })
                     );
@@ -3047,6 +3101,7 @@ const VentasPage = () => {
                   selectedPriceListId={selectedPriceListId} 
                   placeholder="Seleccionar productos"
                   maxDisplayed={50}
+                  fetchProducts={fetchProductOptions}
                 />
               </Box>
             </Box>
