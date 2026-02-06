@@ -27,7 +27,10 @@ export class BackupService {
         notes,
         notifications,
       ] = await Promise.all([
-        this.prisma.product.findMany({ where: { userId }, include: { customCategories: true } }),
+        this.prisma.product.findMany({
+          where: { userId },
+          include: { customCategories: true },
+        }),
         this.prisma.customer.findMany({ where: { userId } }),
         this.prisma.supplier.findMany({ where: { userId } }),
         this.prisma.sale.findMany({
@@ -35,7 +38,7 @@ export class BackupService {
           include: { items: true, installments: true },
         }),
         this.prisma.payment.findMany({
-          where: { sale: { userId } }
+          where: { sale: { userId } },
         }),
         this.prisma.dailyCash.findMany({
           where: { userId },
@@ -52,11 +55,11 @@ export class BackupService {
         this.prisma.expenseCategory.findMany({ where: { userId } }),
         this.prisma.customCategory.findMany({ where: { userId } }),
         this.prisma.productReturn.findMany({
-          where: { product: { userId } }
+          where: { product: { userId } },
         }),
         this.prisma.priceList.findMany({ where: { userId } }),
         this.prisma.productPrice.findMany({
-          where: { product: { userId } }
+          where: { product: { userId } },
         }),
         this.prisma.note.findMany({ where: { userId } }),
         this.prisma.notification.findMany({ where: { userId } }),
@@ -95,10 +98,15 @@ export class BackupService {
     return this.prisma.$transaction(
       async (tx) => {
         try {
-          console.log(`Starting import for user ${userId}. Keys present:`, Object.keys(data));
+          console.log(
+            `Starting import for user ${userId}. Keys present:`,
+            Object.keys(data),
+          );
 
           // 1. Clear current user's data (reversing relationship order to avoid FK errors)
-          await tx.dailyCashMovement.deleteMany({ where: { dailyCash: { userId } } });
+          await tx.dailyCashMovement.deleteMany({
+            where: { dailyCash: { userId } },
+          });
           await tx.payment.deleteMany({ where: { sale: { userId } } });
           await tx.installment.deleteMany({ where: { sale: { userId } } });
           await tx.saleItem.deleteMany({ where: { sale: { userId } } });
@@ -106,8 +114,12 @@ export class BackupService {
           await tx.saleEditHistory.deleteMany({ where: { sale: { userId } } });
           await tx.budgetItem.deleteMany({ where: { budget: { userId } } });
           await tx.productPrice.deleteMany({ where: { product: { userId } } });
-          await tx.productCustomCategory.deleteMany({ where: { product: { userId } } });
-          await tx.supplierProduct.deleteMany({ where: { product: { userId } } });
+          await tx.productCustomCategory.deleteMany({
+            where: { product: { userId } },
+          });
+          await tx.supplierProduct.deleteMany({
+            where: { product: { userId } },
+          });
           await tx.productReturn.deleteMany({ where: { product: { userId } } });
           await tx.sale.deleteMany({ where: { userId } });
           await tx.dailyCash.deleteMany({ where: { userId } });
@@ -126,7 +138,7 @@ export class BackupService {
           await tx.notification.deleteMany({ where: { userId } });
 
           const ensureDate = (d: any) => (d ? new Date(d) : undefined);
-          
+
           const normalizeRubro = (r: any): any => {
             if (!r) return undefined;
             const s = String(r).toLowerCase().trim();
@@ -139,7 +151,14 @@ export class BackupService {
           const normalizePaymentMethod = (m: any): any => {
             if (!m) return 'EFECTIVO';
             const s = String(m).toUpperCase().trim();
-            const valid = ['EFECTIVO', 'TRANSFERENCIA', 'TARJETA', 'CHEQUE', 'CUENTA_CORRIENTE', 'CREDITO_CUOTAS'];
+            const valid = [
+              'EFECTIVO',
+              'TRANSFERENCIA',
+              'TARJETA',
+              'CHEQUE',
+              'CUENTA_CORRIENTE',
+              'CREDITO_CUOTAS',
+            ];
             if (valid.includes(s)) return s;
             if (s === 'CASH') return 'EFECTIVO';
             if (s === 'TRANSFER') return 'TRANSFERENCIA';
@@ -150,8 +169,32 @@ export class BackupService {
           const normalizeUnit = (u: any): any => {
             if (!u) return 'Unid';
             const s = String(u).trim();
-            const units = ['General', 'A', 'Bulto', 'Cajon', 'Caja', 'Ciento', 'Cm', 'Docena', 'Gr', 'Kg', 'L', 'M', 'M2', 'M3', 'Ml', 'Mm', 'Pulg', 'Ton', 'Unid', 'V', 'W'];
-            const found = units.find(val => val.toLowerCase() === s.toLowerCase());
+            const units = [
+              'General',
+              'A',
+              'Bulto',
+              'Cajon',
+              'Caja',
+              'Ciento',
+              'Cm',
+              'Docena',
+              'Gr',
+              'Kg',
+              'L',
+              'M',
+              'M2',
+              'M3',
+              'Ml',
+              'Mm',
+              'Pulg',
+              'Ton',
+              'Unid',
+              'V',
+              'W',
+            ];
+            const found = units.find(
+              (val) => val.toLowerCase() === s.toLowerCase(),
+            );
             return found || 'Unid';
           };
 
@@ -181,17 +224,29 @@ export class BackupService {
           const normalizeNotificationType = (t: any): any => {
             if (!t) return 'system';
             const s = String(t).toLowerCase().trim();
-            if (s === 'system' || s === 'update' || s === 'alert' || s === 'message') return s;
+            if (
+              s === 'system' ||
+              s === 'update' ||
+              s === 'alert' ||
+              s === 'message'
+            )
+              return s;
             return 'system';
           };
 
           const getList = (key: string) => {
             if (Array.isArray(data[key])) return data[key];
             if (Array.isArray(data[key + 's'])) return data[key + 's'];
-            if (key === 'dailyCash' && Array.isArray(data['dailyCashes'])) return data['dailyCashes'];
-            if (key === 'expenseCategory' && (Array.isArray(data['expenseCategories']) || Array.isArray(data['expensesCategories']))) 
+            if (key === 'dailyCash' && Array.isArray(data['dailyCashes']))
+              return data['dailyCashes'];
+            if (
+              key === 'expenseCategory' &&
+              (Array.isArray(data['expenseCategories']) ||
+                Array.isArray(data['expensesCategories']))
+            )
               return data['expenseCategories'] || data['expensesCategories'];
-            if (key === 'productReturn' && Array.isArray(data['returns'])) return data['returns'];
+            if (key === 'productReturn' && Array.isArray(data['returns']))
+              return data['returns'];
             return [];
           };
 
@@ -206,94 +261,177 @@ export class BackupService {
 
           // User Preferences (Only one per user)
           const prefs = data.userPreferences || data.preferences || [];
-          const prefsList = Array.isArray(prefs) ? prefs : (Object.keys(prefs).length ? [prefs] : []);
+          const prefsList = Array.isArray(prefs)
+            ? prefs
+            : Object.keys(prefs).length
+              ? [prefs]
+              : [];
           if (prefsList.length > 0) {
-            const { id, userId: _, ...rest } = prefsList[0]; // Take only the first one
+            const { id: _id, userId: _unusedUserId, ...rest } = prefsList[0]; // Take only the first one
             await tx.userPreferences.create({ data: { ...rest, userId } });
           }
 
           // Business Data (Take only the first one to be safe, though not strictly unique in schema)
           const bData = getList('businessData');
           if (bData.length > 0) {
-            const { id, userId: _, ...rest } = bData[0];
+            const { id: _id, userId: _unusedUserId, ...rest } = bData[0];
             await tx.businessData.create({ data: { ...rest, userId } });
           }
 
           // Customers
           for (const c of getList('customer')) {
-            const { id: oldId, userId: _, rubro, budgets, customerNotes, payments, sales, ...rest } = c;
+            const {
+              id: oldId,
+              userId: _unusedUserId,
+              rubro,
+              budgets: _budgets,
+              customerNotes: _customerNotes,
+              payments: _payments,
+              sales: _sales,
+              ...rest
+            } = c;
             // Ensure id is a string and preserved if possible (Customer uses String @id)
-            const newCustomer = await tx.customer.create({ 
-              data: { ...rest, rubro: normalizeRubro(rubro), id: String(oldId), userId } 
+            const newCustomer = await tx.customer.create({
+              data: {
+                ...rest,
+                rubro: normalizeRubro(rubro),
+                id: String(oldId),
+                userId,
+              },
             });
             customerMap.set(oldId, newCustomer.id);
           }
 
           // Suppliers
           for (const s of getList('supplier')) {
-            const { id: oldId, userId: _, createdAt, updatedAt, rubro, supplierProducts, ...rest } = s;
-            const newSupplier = await tx.supplier.create({ 
-              data: { ...rest, rubro: normalizeRubro(rubro), userId, createdAt: ensureDate(createdAt), updatedAt: ensureDate(updatedAt) } 
+            const {
+              id: oldId,
+              userId: _unusedUserId,
+              createdAt,
+              updatedAt,
+              rubro,
+              supplierProducts: _supplierProducts,
+              ...rest
+            } = s;
+            const newSupplier = await tx.supplier.create({
+              data: {
+                ...rest,
+                rubro: normalizeRubro(rubro),
+                userId,
+                createdAt: ensureDate(createdAt),
+                updatedAt: ensureDate(updatedAt),
+              },
             });
             supplierMap.set(oldId, newSupplier.id);
           }
 
           // Products
           for (const p of getList('product')) {
-            const { id: oldId, userId: _, createdAt, updatedAt, rubro, unit, customCategories, productPrices, productReturns, saleItems, supplierProducts, hasIvaIncluded, setMinStock, ...rest } = p;
-            const newProduct = await tx.product.create({ 
-              data: { 
+            const {
+              id: oldId,
+              userId: _unusedUserId,
+              createdAt,
+              updatedAt,
+              rubro,
+              unit,
+              customCategories,
+              productPrices: _productPrices,
+              productReturns: _productReturns,
+              saleItems: _saleItems,
+              supplierProducts: _supplierProducts,
+              hasIvaIncluded,
+              setMinStock,
+              ...rest
+            } = p;
+            const newProduct = await tx.product.create({
+              data: {
                 ...rest,
                 rubro: normalizeRubro(rubro),
                 unit: normalizeUnit(unit),
                 hasIvaIncluded: Boolean(hasIvaIncluded), // Force boolean
-                setMinStock: Boolean(setMinStock),       // Force boolean
-                userId, 
-                createdAt: ensureDate(createdAt), 
+                setMinStock: Boolean(setMinStock), // Force boolean
+                userId,
+                createdAt: ensureDate(createdAt),
                 updatedAt: ensureDate(updatedAt),
-                customCategories: (customCategories && Array.isArray(customCategories)) ? {
-                  create: customCategories.map((cc: any) => ({
-                    name: cc.name,
-                    rubro: normalizeRubro(cc.rubro)
-                  }))
-                } : undefined
-              } 
+                customCategories:
+                  customCategories && Array.isArray(customCategories)
+                    ? {
+                        create: customCategories.map((cc: any) => ({
+                          name: cc.name,
+                          rubro: normalizeRubro(cc.rubro),
+                        })),
+                      }
+                    : undefined,
+              },
             });
             productMap.set(oldId, newProduct.id);
           }
 
           // Price Lists
           for (const pl of getList('priceList')) {
-            const { id: oldId, userId: _, rubro, productPrices, ...rest } = pl;
-            const newPL = await tx.priceList.create({ 
-              data: { ...rest, rubro: normalizeRubro(rubro), userId } 
+            const {
+              id: oldId,
+              userId: _unusedUserId,
+              rubro,
+              productPrices: _productPrices,
+              ...rest
+            } = pl;
+            const newPL = await tx.priceList.create({
+              data: { ...rest, rubro: normalizeRubro(rubro), userId },
             });
             priceListMap.set(oldId, newPL.id);
           }
 
           // Product Prices
           for (const pp of getList('productPrice')) {
-            const { id, productId, priceListId, ...rest } = pp;
+            const { id: _id, productId, priceListId, ...rest } = pp;
             const newProductId = productMap.get(productId);
             const newPriceListId = priceListMap.get(priceListId);
             if (newProductId && newPriceListId) {
-              await tx.productPrice.create({ 
-                data: { ...rest, productId: newProductId, priceListId: newPriceListId } 
+              await tx.productPrice.create({
+                data: {
+                  ...rest,
+                  productId: newProductId,
+                  priceListId: newPriceListId,
+                },
               });
             }
           }
 
           // Custom Categories
           for (const cc of getList('customCategory')) {
-            const { id, userId: _, rubro, ...rest } = cc;
-            await tx.customCategory.create({ 
-              data: { ...rest, rubro: normalizeRubro(rubro), userId } 
+            const { id: _id, userId: _unusedUserId, rubro, ...rest } = cc;
+            await tx.customCategory.create({
+              data: { ...rest, rubro: normalizeRubro(rubro), userId },
             });
           }
 
           // Sales & Related
           for (const sale of getList('sale')) {
-            const { items, installments, id, createdAt, updatedAt, date, customerId, priceListId, rubro, creditAlerts, payments, editHistory, products, customer, paymentMethod, paymentMethods, chequeInfo, credit, paid, edited, fromBudget, ...saleData } = sale;
+            const {
+              items,
+              installments,
+              id,
+              createdAt,
+              updatedAt,
+              date,
+              customerId,
+              priceListId,
+              rubro,
+              creditAlerts: _creditAlerts,
+              payments: _payments,
+              editHistory: _editHistory,
+              products: _products,
+              customer: _customer,
+              paymentMethod: _paymentMethod,
+              paymentMethods: _paymentMethods,
+              chequeInfo: _chequeInfo,
+              credit,
+              paid,
+              edited,
+              fromBudget,
+              ...saleData
+            } = sale;
             const newSale = await tx.sale.create({
               data: {
                 ...saleData,
@@ -303,7 +441,10 @@ export class BackupService {
                 paid: Boolean(paid),
                 edited: Boolean(edited),
                 fromBudget: Boolean(fromBudget),
-                customerId: customerId && customerMap.has(customerId) ? customerMap.get(customerId) : null,
+                customerId:
+                  customerId && customerMap.has(customerId)
+                    ? customerMap.get(customerId)
+                    : null,
                 priceListId: priceListId ? priceListMap.get(priceListId) : null,
                 date: ensureDate(date),
                 createdAt: ensureDate(createdAt),
@@ -314,7 +455,13 @@ export class BackupService {
 
             if (items) {
               for (const item of items) {
-                const { id: itemId, productId, rubro, unit, ...itemRest } = item;
+                const {
+                  id: _itemId,
+                  productId,
+                  rubro,
+                  unit,
+                  ...itemRest
+                } = item;
                 await tx.saleItem.create({
                   data: {
                     ...itemRest,
@@ -322,14 +469,22 @@ export class BackupService {
                     unit: normalizeUnit(unit),
                     saleId: newSale.id,
                     productId: productMap.get(productId), // Removed dangerous fallback '|| productId' to prevent INT overflow
-                  }
+                  },
                 });
               }
             }
 
             if (installments) {
               for (const inst of installments) {
-                const { id: instId, dueDate, paymentDate, createdAt, updatedAt, paymentMethod, ...instRest } = inst;
+                const {
+                  id: _instId,
+                  dueDate,
+                  paymentDate,
+                  createdAt,
+                  updatedAt,
+                  paymentMethod,
+                  ...instRest
+                } = inst;
                 await tx.installment.create({
                   data: {
                     ...instRest,
@@ -339,7 +494,7 @@ export class BackupService {
                     paymentDate: ensureDate(paymentDate),
                     createdAt: ensureDate(createdAt),
                     updatedAt: ensureDate(updatedAt),
-                  }
+                  },
                 });
               }
             }
@@ -347,7 +502,18 @@ export class BackupService {
 
           // Payments
           for (const p of getList('payment')) {
-            const { id: oldId, saleId, customerId, date, createdAt, updatedAt, method, saleDate, checkStatus, ...rest } = p;
+            const {
+              id: oldId,
+              saleId,
+              customerId,
+              date,
+              createdAt,
+              updatedAt,
+              method,
+              saleDate: _saleDate,
+              checkStatus: _checkStatus,
+              ...rest
+            } = p;
             const newSaleId = saleMap.get(saleId);
             if (newSaleId) {
               const newPayment = await tx.payment.create({
@@ -355,11 +521,14 @@ export class BackupService {
                   ...rest,
                   method: normalizePaymentMethod(method),
                   saleId: newSaleId,
-                  customerId: customerId && customerMap.has(customerId) ? customerMap.get(customerId) : null,
+                  customerId:
+                    customerId && customerMap.has(customerId)
+                      ? customerMap.get(customerId)
+                      : null,
                   date: ensureDate(date),
                   createdAt: ensureDate(createdAt),
                   updatedAt: ensureDate(updatedAt),
-                }
+                },
               });
               paymentMap.set(oldId, newPayment.id);
             }
@@ -367,7 +536,25 @@ export class BackupService {
 
           // Daily Cash & Movements
           for (const cash of getList('dailyCash')) {
-            const { movements, id: oldId, date, closingDate, createdAt, updatedAt, initialAmount, closed, totalIncome, totalExpense, totalProfit, closingAmount, cashIncome, cashExpense, otherIncome, closingDifference, ...cashData } = cash;
+            const {
+              movements,
+              id: oldId,
+              date,
+              closingDate,
+              createdAt,
+              updatedAt,
+              initialAmount: _initialAmount,
+              closed: _closed,
+              totalIncome: _totalIncome,
+              totalExpense: _totalExpense,
+              totalProfit: _totalProfit,
+              closingAmount: _closingAmount,
+              cashIncome: _cashIncome,
+              cashExpense: _cashExpense,
+              otherIncome: _otherIncome,
+              closingDifference: _closingDifference,
+              ...cashData
+            } = cash;
             const newCash = await tx.dailyCash.create({
               data: {
                 ...cashData,
@@ -382,7 +569,28 @@ export class BackupService {
 
             if (movements) {
               for (const m of movements) {
-                const { id, date, createdAt, timestamp, paymentId, productId, customerId, supplierId, originalSaleId, expenseId, productReturnId, installmentId, rubro, unit, method, paymentMethod, type, items, combinedPaymentMethods, ...mRest } = m;
+                const {
+                  id: _id,
+                  date,
+                  createdAt,
+                  timestamp,
+                  paymentId,
+                  productId,
+                  customerId,
+                  supplierId,
+                  originalSaleId,
+                  expenseId: _expenseId,
+                  productReturnId: _productReturnId,
+                  installmentId: _installmentId,
+                  rubro,
+                  unit,
+                  method,
+                  paymentMethod,
+                  type,
+                  items: _items,
+                  combinedPaymentMethods: _combinedPaymentMethods,
+                  ...mRest
+                } = m;
                 await tx.dailyCashMovement.create({
                   data: {
                     ...mRest,
@@ -393,17 +601,25 @@ export class BackupService {
                     type: normalizeMovementType(type),
                     dailyCashId: newCash.id,
                     productId: productId ? productMap.get(productId) : null,
-                    customerId: customerId && customerMap.has(customerId) ? customerMap.get(customerId) : null,
-                    supplierId: supplierId && supplierMap.has(supplierId) ? supplierMap.get(supplierId) : null,
+                    customerId:
+                      customerId && customerMap.has(customerId)
+                        ? customerMap.get(customerId)
+                        : null,
+                    supplierId:
+                      supplierId && supplierMap.has(supplierId)
+                        ? supplierMap.get(supplierId)
+                        : null,
                     paymentId: paymentId ? paymentMap.get(paymentId) : null,
-                    originalSaleId: originalSaleId ? saleMap.get(originalSaleId) : null,
+                    originalSaleId: originalSaleId
+                      ? saleMap.get(originalSaleId)
+                      : null,
                     expenseId: null, // No expenseMap available
                     productReturnId: null, // No productReturnMap available
                     installmentId: null, // No installmentMap available
                     date: ensureDate(date),
                     createdAt: ensureDate(createdAt),
                     timestamp: ensureDate(timestamp),
-                  }
+                  },
                 });
               }
             }
@@ -411,15 +627,33 @@ export class BackupService {
 
           // Budgets
           for (const budget of getList('budget')) {
-            const { items, id: oldId, date, customerId, rubro, budgetNotes, expirationDate, deposit, remaining, createdAt, updatedAt, ...budgetData } = budget;
+            const {
+              items,
+              id: oldId,
+              date,
+              customerId,
+              rubro,
+              budgetNotes: _budgetNotes,
+              expirationDate,
+              deposit,
+              remaining,
+              createdAt,
+              updatedAt,
+              ...budgetData
+            } = budget;
             const newBudget = await tx.budget.create({
               data: {
                 ...budgetData,
                 rubro: normalizeRubro(rubro),
                 userId,
                 id: oldId, // Budget uses UUID string, can usually preserve
-                customerId: customerId && customerMap.has(customerId) ? customerMap.get(customerId) : null,
-                expirationDate: expirationDate ? ensureDate(expirationDate) : null,
+                customerId:
+                  customerId && customerMap.has(customerId)
+                    ? customerMap.get(customerId)
+                    : null,
+                expirationDate: expirationDate
+                  ? ensureDate(expirationDate)
+                  : null,
                 deposit: deposit ? String(deposit) : null,
                 remaining: remaining ? parseFloat(String(remaining)) : null,
                 date: ensureDate(date),
@@ -431,7 +665,7 @@ export class BackupService {
 
             if (items) {
               for (const item of items) {
-                const { id, productId, rubro, unit, ...itRest } = item;
+                const { id: _id, productId, rubro, unit, ...itRest } = item;
                 await tx.budgetItem.create({
                   data: {
                     ...itRest,
@@ -439,7 +673,7 @@ export class BackupService {
                     unit: normalizeUnit(unit),
                     budgetId: newBudget.id,
                     productId: productId ? productMap.get(productId) : null,
-                  }
+                  },
                 });
               }
             }
@@ -447,19 +681,29 @@ export class BackupService {
 
           // Other simple models
           for (const ec of getList('expenseCategory')) {
-            const { id, userId: _, rubro, type, ...rest } = ec;
-            await tx.expenseCategory.create({ 
-              data: { 
-                ...rest, 
+            const { id: _id, userId: _unusedUserId, rubro, type, ...rest } = ec;
+            await tx.expenseCategory.create({
+              data: {
+                ...rest,
                 rubro: normalizeRubro(rubro),
                 type: normalizeMovementType(type),
-                userId 
-              } 
+                userId,
+              },
             });
           }
 
           for (const e of getList('expense')) {
-            const { id, date, createdAt, updatedAt, userId: _, rubro, paymentMethod, type, ...rest } = e;
+            const {
+              id: _id,
+              date,
+              createdAt: _createdAt,
+              updatedAt: _updatedAt,
+              userId: _unusedUserId,
+              rubro,
+              paymentMethod,
+              type,
+              ...rest
+            } = e;
             await tx.expense.create({
               data: {
                 ...rest,
@@ -471,69 +715,97 @@ export class BackupService {
                 // Expense model doesn't have createdAt/updatedAt
                 // createdAt: ensureDate(createdAt),
                 // updatedAt: ensureDate(updatedAt),
-              }
+              },
             });
           }
 
           for (const promo of getList('promotion')) {
-            const { id, userId: _, type, status, ...rest } = promo;
-            await tx.promotion.create({ 
-              data: { 
-                ...rest, 
+            const {
+              id: _id,
+              userId: _unusedUserId,
+              type,
+              status,
+              ...rest
+            } = promo;
+            await tx.promotion.create({
+              data: {
+                ...rest,
                 type: normalizePromotionType(type),
                 status: normalizePromotionStatus(status),
-                userId 
-              } 
+                userId,
+              },
             });
           }
 
           for (const note of getList('note')) {
-            const { id, userId: _, customerId, budgetId, ...rest } = note;
+            const {
+              id: _id,
+              userId: _unusedUserId,
+              customerId,
+              budgetId,
+              ...rest
+            } = note;
             await tx.note.create({
               data: {
                 ...rest,
                 userId,
-                customerId: customerId && customerMap.has(customerId) ? customerMap.get(customerId) : null,
-                budgetId: budgetId && budgetMap.has(budgetId) ? budgetMap.get(budgetId) : null,
-              }
+                customerId:
+                  customerId && customerMap.has(customerId)
+                    ? customerMap.get(customerId)
+                    : null,
+                budgetId:
+                  budgetId && budgetMap.has(budgetId)
+                    ? budgetMap.get(budgetId)
+                    : null,
+              },
             });
           }
 
           for (const n of getList('notification')) {
-            const { id, userId: _, type, actualizationId, read, isDeleted, ...rest } = n;
-            await tx.notification.create({ 
-              data: { 
-                ...rest, 
+            const {
+              id: _id,
+              userId: _unusedUserId,
+              type,
+              actualizationId: _actualizationId,
+              read,
+              isDeleted,
+              ...rest
+            } = n;
+            await tx.notification.create({
+              data: {
+                ...rest,
                 read: Boolean(read),
                 isDeleted: Boolean(isDeleted),
                 type: normalizeNotificationType(type),
                 userId,
-                actualizationId: null, // Prevent INT4 overflow if backup has large ID 
-              } 
+                actualizationId: null, // Prevent INT4 overflow if backup has large ID
+              },
             });
           }
 
           for (const sp of getList('supplierProduct')) {
-            const { id, supplierId, productId, ...rest } = sp;
+            const { id: _id, supplierId, productId, ...rest } = sp;
             const newSupId = supplierMap.get(supplierId);
             const newProdId = productMap.get(productId);
             if (newSupId && newProdId) {
-              await tx.supplierProduct.create({ data: { ...rest, supplierId: newSupId, productId: newProdId } });
+              await tx.supplierProduct.create({
+                data: { ...rest, supplierId: newSupId, productId: newProdId },
+              });
             }
           }
 
           for (const ret of getList('productReturn')) {
-            const { id, productId, date, rubro, unit, ...rest } = ret;
+            const { id: _id, productId, date, rubro, unit, ...rest } = ret;
             const newProdId = productMap.get(productId);
             if (newProdId) {
-              await tx.productReturn.create({ 
-                data: { 
-                  ...rest, 
+              await tx.productReturn.create({
+                data: {
+                  ...rest,
                   rubro: normalizeRubro(rubro),
                   unit: normalizeUnit(unit),
-                  productId: newProdId, 
-                  date: ensureDate(date) 
-                } 
+                  productId: newProdId,
+                  date: ensureDate(date),
+                },
               });
             }
           }
@@ -541,7 +813,9 @@ export class BackupService {
           return { message: 'Importación completada exitosamente' };
         } catch (error) {
           console.error('Error durante la importación:', error);
-          throw new InternalServerErrorException('Error al importar backup: ' + error.message);
+          throw new InternalServerErrorException(
+            'Error al importar backup: ' + error.message,
+          );
         }
       },
       {
