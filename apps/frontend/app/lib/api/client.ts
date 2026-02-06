@@ -37,9 +37,9 @@ class ApiClient {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
-    // Si estamos cerrando sesión, devolvemos una promesa infinita para silenciar todo
+    // Si estamos cerrando sesión, devolvemos null inmediatamente para no bloquear la navegación
     if (this.ignoreSessionErrors) {
-        return new Promise(() => {}); 
+        return Promise.resolve(null as T); 
     }
 
     const url = `${this.baseURL}${endpoint}`;
