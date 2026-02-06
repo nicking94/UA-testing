@@ -240,12 +240,14 @@ export class BackupService {
 
           // Products
           for (const p of getList('product')) {
-            const { id: oldId, userId: _, createdAt, updatedAt, rubro, unit, customCategories, productPrices, productReturns, saleItems, supplierProducts, ...rest } = p;
+            const { id: oldId, userId: _, createdAt, updatedAt, rubro, unit, customCategories, productPrices, productReturns, saleItems, supplierProducts, hasIvaIncluded, setMinStock, ...rest } = p;
             const newProduct = await tx.product.create({ 
               data: { 
-                ...rest, 
+                ...rest,
                 rubro: normalizeRubro(rubro),
                 unit: normalizeUnit(unit),
+                hasIvaIncluded: Boolean(hasIvaIncluded), // Force boolean
+                setMinStock: Boolean(setMinStock),       // Force boolean
                 userId, 
                 createdAt: ensureDate(createdAt), 
                 updatedAt: ensureDate(updatedAt),
@@ -291,12 +293,16 @@ export class BackupService {
 
           // Sales & Related
           for (const sale of getList('sale')) {
-            const { items, installments, id, createdAt, updatedAt, date, customerId, priceListId, rubro, creditAlerts, payments, editHistory, products, customer, paymentMethod, paymentMethods, chequeInfo, ...saleData } = sale;
+            const { items, installments, id, createdAt, updatedAt, date, customerId, priceListId, rubro, creditAlerts, payments, editHistory, products, customer, paymentMethod, paymentMethods, chequeInfo, credit, paid, edited, fromBudget, ...saleData } = sale;
             const newSale = await tx.sale.create({
               data: {
                 ...saleData,
                 rubro: normalizeRubro(rubro),
                 userId,
+                credit: Boolean(credit),
+                paid: Boolean(paid),
+                edited: Boolean(edited),
+                fromBudget: Boolean(fromBudget),
                 customerId: customerId && customerMap.has(customerId) ? customerMap.get(customerId) : null,
                 priceListId: priceListId ? priceListMap.get(priceListId) : null,
                 date: ensureDate(date),
@@ -315,7 +321,7 @@ export class BackupService {
                     rubro: normalizeRubro(rubro),
                     unit: normalizeUnit(unit),
                     saleId: newSale.id,
-                    productId: productMap.get(productId) || productId, // Fallback to original if mapping fails
+                    productId: productMap.get(productId), // Removed dangerous fallback '|| productId' to prevent INT overflow
                   }
                 });
               }
@@ -494,10 +500,12 @@ export class BackupService {
           }
 
           for (const n of getList('notification')) {
-            const { id, userId: _, type, actualizationId, ...rest } = n;
+            const { id, userId: _, type, actualizationId, read, isDeleted, ...rest } = n;
             await tx.notification.create({ 
               data: { 
                 ...rest, 
+                read: Boolean(read),
+                isDeleted: Boolean(isDeleted),
                 type: normalizeNotificationType(type),
                 userId,
                 actualizationId: null, // Prevent INT4 overflow if backup has large ID 
