@@ -5,6 +5,7 @@ import Sidebar from "../components/Sidebar";
 import { useSidebar } from "../context/SidebarContext";
 import { useRouter } from "next/navigation";
 import { authApi } from "../lib/api/auth";
+import { apiClient } from "../lib/api/client";
 import TrialNotification from "../components/TrialNotification";
 import { PaginationProvider } from "../context/PaginationContext";
 import UpdatesManager from "../components/Notifications/UpdatesManager";
@@ -32,15 +33,16 @@ export default function AppLayout({
   const handleCloseSession = async () => {
     try {
       setIsLoggingOut(true);
-      // Damos tiempo a que React desmonte los componentes antes de borrar el token
-      // Esto evita que los componentes intenten hacer peticiones sin token justo antes de morir
-      setTimeout(() => {
-        authApi.logout();
-        router.replace("/login");
-      }, 100);
+      // Activamos el modo silencioso en el cliente de API
+      // Esto hará que cualquier petición pendiente o nueva devuelva una promesa infinita
+      apiClient.setIgnoreSessionErrors(true);
+      
+      authApi.logout();
+      router.replace("/login");
     } catch (error) {
       console.error("Error al cerrar sesión:", error);
       setIsLoggingOut(false);
+      apiClient.setIgnoreSessionErrors(false);
     }
   };
 
