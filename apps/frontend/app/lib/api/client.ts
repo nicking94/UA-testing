@@ -28,6 +28,9 @@ class ApiClient {
     };
     if (this.token) {
       headers['Authorization'] = `Bearer ${this.token}`;
+    } else if (!endpoint.startsWith('/auth/')) {
+        // Si no hay token y no es una ruta de auth, no hacemos la petición para evitar 401 innecesarios
+        return null as T;
     }
     try {
       const response = await fetch(url, {
