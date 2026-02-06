@@ -30,21 +30,34 @@ export default function AppLayout({
     setTheme((prev) => (prev === "dark" ? "light" : "dark"));
   };
 
-  const handleCloseSession = async () => {
-    try {
-      setIsLoggingOut(true);
-      // Activamos el modo silencioso en el cliente de API
-      // Esto hará que cualquier petición pendiente o nueva devuelva una promesa infinita
-      apiClient.setIgnoreSessionErrors(true);
-      
-      authApi.logout();
-      router.replace("/login");
-    } catch (error) {
-      console.error("Error al cerrar sesión:", error);
-      setIsLoggingOut(false);
-      apiClient.setIgnoreSessionErrors(false);
-    }
+  const handleCloseSession = () => {
+    setIsLoggingOut(true);
   };
+
+  useEffect(() => {
+    if (isLoggingOut) {
+      // Este efecto se ejecuta DESPUÉS de que el componente se ha renderizado con el estado isLoggingOut=true
+      // En este punto, el return del componente ya habrá renderizado el Box vacío, desmontando todo lo demás.
+      
+      const performLogout = async () => {
+        try {
+          // Activamos modo silencioso por si queda algo vivo
+          apiClient.setIgnoreSessionErrors(true);
+          
+          authApi.logout();
+          router.replace("/login");
+        } catch (error) {
+          console.error("Error crítico al cerrar sesión:", error);
+          // Si falla, forzamos recarga como último recurso
+          window.location.href = "/login";
+        }
+      };
+
+      // Un pequeño tick para asegurar que el DOM se ha limpiado
+      const timer = setTimeout(performLogout, 10);
+      return () => clearTimeout(timer);
+    }
+  }, [isLoggingOut, router]);
 
   useEffect(() => {
     const loadTheme = () => {
