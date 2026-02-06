@@ -376,7 +376,7 @@ export class BackupService {
 
             if (movements) {
               for (const m of movements) {
-                const { id, date, createdAt, timestamp, paymentId, productId, customerId, rubro, unit, method, paymentMethod, type, ...mRest } = m;
+                const { id, date, createdAt, timestamp, paymentId, productId, customerId, rubro, unit, method, paymentMethod, type, items, combinedPaymentMethods, ...mRest } = m;
                 await tx.dailyCashMovement.create({
                   data: {
                     ...mRest,
