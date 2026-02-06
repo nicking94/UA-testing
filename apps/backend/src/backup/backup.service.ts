@@ -297,7 +297,7 @@ export class BackupService {
                 ...saleData,
                 rubro: normalizeRubro(rubro),
                 userId,
-                customerId: customerId ? (customerMap.get(customerId) || String(customerId)) : null,
+                customerId: customerId && customerMap.has(customerId) ? customerMap.get(customerId) : null,
                 priceListId: priceListId ? priceListMap.get(priceListId) : null,
                 date: ensureDate(date),
                 createdAt: ensureDate(createdAt),
@@ -349,7 +349,7 @@ export class BackupService {
                   ...rest,
                   method: normalizePaymentMethod(method),
                   saleId: newSaleId,
-                  customerId: customerId ? (customerMap.get(customerId) || String(customerId)) : null,
+                  customerId: customerId && customerMap.has(customerId) ? customerMap.get(customerId) : null,
                   date: ensureDate(date),
                   createdAt: ensureDate(createdAt),
                   updatedAt: ensureDate(updatedAt),
@@ -387,7 +387,7 @@ export class BackupService {
                     type: normalizeMovementType(type),
                     dailyCashId: newCash.id,
                     productId: productId ? productMap.get(productId) : null,
-                    customerId: customerId ? (customerMap.get(customerId) || String(customerId)) : null,
+                    customerId: customerId && customerMap.has(customerId) ? customerMap.get(customerId) : null,
                     paymentId: paymentId ? paymentMap.get(paymentId) : null,
                     date: ensureDate(date),
                     createdAt: ensureDate(createdAt),
@@ -407,7 +407,7 @@ export class BackupService {
                 rubro: normalizeRubro(rubro),
                 userId,
                 id: oldId, // Budget uses UUID string, can usually preserve
-                customerId: customerId ? (customerMap.get(customerId) || String(customerId)) : null,
+                customerId: customerId && customerMap.has(customerId) ? customerMap.get(customerId) : null,
                 date: ensureDate(date),
               },
             });
@@ -476,8 +476,8 @@ export class BackupService {
               data: {
                 ...rest,
                 userId,
-                customerId: customerId ? (customerMap.get(customerId) || String(customerId)) : null,
-                budgetId: budgetId ? (budgetMap.get(budgetId) || String(budgetId)) : null,
+                customerId: customerId && customerMap.has(customerId) ? customerMap.get(customerId) : null,
+                budgetId: budgetId && budgetMap.has(budgetId) ? budgetMap.get(budgetId) : null,
               }
             });
           }
