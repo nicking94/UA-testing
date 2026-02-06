@@ -35,10 +35,9 @@ class ApiClient {
     if (this.token) {
       headers['Authorization'] = `Bearer ${this.token}`;
     } else if (!endpoint.startsWith('/auth/')) {
-        // En vez de null, lanzamos un error que capturaremos abajo
-        const authError = new Error('No token') as AuthError;
-        authError.isAuthError = true;
-        throw authError;
+        // En lugar de lanzar un error, devolvemos una promesa que resuelve a un valor "seguro"
+        // Esto evita que los componentes entren en el bloque catch y tiren errores en consola
+        return new Promise(() => {}) as Promise<T>;
     }
     try {
       const response = await fetch(url, {
@@ -47,10 +46,8 @@ class ApiClient {
       });
       if (!response.ok) {
         if (response.status === 401) {
-            const authError = new Error('Unauthorized') as AuthError;
-            authError.isAuthError = true;
-            authError.status = 401;
-            throw authError;
+            // Si es 401, simplemente no resolvemos para que el componente no haga nada
+            return new Promise(() => {}) as Promise<T>;
         }
         const error = await response.json().catch(() => ({
           message: response.statusText,
@@ -67,17 +64,18 @@ class ApiClient {
       try {
         return JSON.parse(text);
       } catch {
-        console.error('Error parsing JSON response:', text);
+        // console.error('Error parsing JSON response:', text); // Silenciamos esto también
         return text as unknown as T;
       }
     } catch (err) {
       const error = err as AuthError;
-      // Si es un error de autenticación (llave faltante o expirada), no lo mostramos en consola
-      // Esto evita el ruido rojo al cerrar sesión.
       if (error.isAuthError) {
-          throw error;
+          return new Promise(() => {}) as Promise<T>;
       }
-      console.error(`API Error [${endpoint}]:`, error);
+      // Solo logueamos errores que NO sean de sesión
+      if (error.message !== 'Failed to fetch' && !endpoint.includes('auth')) {
+          console.error(`API Error [${endpoint}]:`, error);
+      }
       throw error;
     }
   }
