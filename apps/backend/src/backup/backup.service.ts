@@ -291,7 +291,7 @@ export class BackupService {
 
           // Sales & Related
           for (const sale of getList('sale')) {
-            const { items, installments, id, createdAt, updatedAt, date, customerId, priceListId, rubro, creditAlerts, payments, editHistory, ...saleData } = sale;
+            const { items, installments, id, createdAt, updatedAt, date, customerId, priceListId, rubro, creditAlerts, payments, editHistory, products, customer, paymentMethod, ...saleData } = sale;
             const newSale = await tx.sale.create({
               data: {
                 ...saleData,

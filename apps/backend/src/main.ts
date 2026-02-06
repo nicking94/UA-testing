@@ -1,9 +1,24 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
+import * as express from 'express';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    bodyParser: false, // Disable default body parser
+  });
+  
+  // Configure body parser with increased limits for large backup files
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
+  
+  // Increase timeout for backup imports
+  app.use((req: any, res: any, next: any) => {
+    if (req.url.includes('/backup/import')) {
+      req.setTimeout(300000); // 5 minutes timeout
+    }
+    next();
+  });
   
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
   const origins = frontendUrl.split(',').map(url => url.trim());
