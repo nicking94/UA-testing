@@ -17,6 +17,22 @@ model User {
   updatedAt   DateTime         @updatedAt
   auth        Auth?
   preferences UserPreferences?
+  
+  // Relations for multi-tenancy
+  products          Product[]
+  priceLists        PriceList[]
+  customers         Customer[]
+  suppliers         Supplier[]
+  sales             Sale[]
+  dailyCash         DailyCash[]
+  budgets           Budget[]
+  notes             Note[]
+  customCategories  CustomCategory[]
+  promotions        Promotion[]
+  expenses          Expense[]
+  expenseCategories ExpenseCategory[]
+  notifications     Notification[]
+  businessData      BusinessData[]
 
   @@map("users")
 }
@@ -39,6 +55,8 @@ model Theme {
 
 model Product {
   id               Int                     @id @default(autoincrement())
+  userId           Int                     // Foreign key
+  user             User                    @relation(fields: [userId], references: [id])
   name             String
   stock            Float                   @default(0)
   costPrice        Float                   @default(0)
@@ -50,7 +68,7 @@ model Product {
   expiration       String?
   quantity         Float                   @default(1)
   unit             Unit                    @default(Unid)
-  barcode          String?                 @unique
+  barcode          String?
   description      String?
   category         String?
   brand            String?
@@ -74,6 +92,7 @@ model Product {
   saleItems        SaleItem[]
   supplierProducts SupplierProduct[]
 
+  @@unique([userId, barcode]) // Barcode is unique per user
   @@map("products")
 }
 
@@ -90,6 +109,8 @@ model ProductCustomCategory {
 
 model PriceList {
   id            Int            @id @default(autoincrement())
+  userId        Int
+  user          User           @relation(fields: [userId], references: [id])
   name          String
   rubro         Rubro          @default(comercio)
   isDefault     Boolean        @default(false)
@@ -119,6 +140,8 @@ model ProductPrice {
 
 model Customer {
   id             String         @id
+  userId         Int
+  user           User           @relation(fields: [userId], references: [id])
   name           String
   phone          String?
   email          String?
@@ -141,6 +164,8 @@ model Customer {
 
 model Supplier {
   id               Int               @id @default(autoincrement())
+  userId           Int
+  user             User              @relation(fields: [userId], references: [id])
   companyName      String
   contacts         Json?
   lastVisit        String?
@@ -166,6 +191,8 @@ model SupplierProduct {
 
 model Sale {
   id                     Int               @id @default(autoincrement())
+  userId                 Int
+  user                   User              @relation(fields: [userId], references: [id])
   total                  Float
   date                   DateTime          @default(now())
   barcode                String?
@@ -311,7 +338,9 @@ model CreditAlert {
 
 model DailyCash {
   id                Int                 @id @default(autoincrement())
-  date              DateTime            @unique @db.Date
+  userId            Int
+  user              User                @relation(fields: [userId], references: [id])
+  date              DateTime            @db.Date
   closed            Boolean             @default(false)
   closingAmount     Float?
   closingDate       DateTime?
@@ -330,6 +359,7 @@ model DailyCash {
   updatedAt         DateTime            @updatedAt
   movements         DailyCashMovement[]
 
+  @@unique([userId, date]) // Date is unique per user
   @@index([date])
   @@index([closed])
   @@map("daily_cash")
@@ -389,6 +419,8 @@ model DailyCashMovement {
 
 model Budget {
   id              String       @id @default(uuid())
+  userId          Int
+  user            User         @relation(fields: [userId], references: [id])
   date            DateTime     @default(now())
   name            String?
   customerName    String
@@ -441,6 +473,8 @@ model BudgetItem {
 
 model Note {
   id         Int       @id @default(autoincrement())
+  userId     Int?
+  user       User?     @relation(fields: [userId], references: [id])
   customerId String?
   budgetId   String?
   content    String
@@ -456,11 +490,13 @@ model Note {
 }
 
 model CustomCategory {
-  id    Int    @id @default(autoincrement())
-  name  String
-  rubro Rubro
+  id     Int    @id @default(autoincrement())
+  userId Int
+  user   User   @relation(fields: [userId], references: [id])
+  name   String
+  rubro  Rubro
 
-  @@unique([name, rubro])
+  @@unique([userId, name, rubro])
   @@index([rubro])
   @@map("custom_categories")
 }
@@ -484,10 +520,12 @@ model ProductReturn {
 }
 
 model ExpenseCategory {
-  id    Int         @id @default(autoincrement())
-  name  String
-  rubro Rubro
-  type  ExpenseType @default(EGRESO)
+  id     Int         @id @default(autoincrement())
+  userId Int
+  user   User        @relation(fields: [userId], references: [id])
+  name   String
+  rubro  Rubro
+  type   ExpenseType @default(EGRESO)
 
   @@index([rubro])
   @@index([type])
@@ -496,6 +534,8 @@ model ExpenseCategory {
 
 model Expense {
   id                     Int           @id @default(autoincrement())
+  userId                 Int
+  user                   User          @relation(fields: [userId], references: [id])
   amount                 Float
   date                   DateTime      @default(now()) @db.Date
   description            String
@@ -516,6 +556,8 @@ model Expense {
 
 model Promotion {
   id                Int             @id @default(autoincrement())
+  userId            Int
+  user              User            @relation(fields: [userId], references: [id])
   name              String
   description       String
   type              PromotionType
@@ -536,6 +578,8 @@ model Promotion {
 
 model Notification {
   id              Int               @id @default(autoincrement())
+  userId          Int?
+  user            User?             @relation(fields: [userId], references: [id])
   title           String
   message         String
   date            DateTime          @default(now())
@@ -576,6 +620,8 @@ model UserPreferences {
 
 model BusinessData {
   id      Int    @id @default(autoincrement())
+  userId  Int
+  user    User   @relation(fields: [userId], references: [id])
   name    String
   address String
   phone   String

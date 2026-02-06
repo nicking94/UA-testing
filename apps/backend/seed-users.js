@@ -1,1 +1,47 @@
-const { PrismaClient } = require('@prisma/client');const bcrypt = require('bcrypt');const prisma = new PrismaClient();const users = [  { username: 'administrador', password: 'administrador' },  { username: 'demo', password: 'demo' },  { username: 'El pollo loco', password: 'albano.210501' },  { username: 'CMTECNOSTORE', password: 'CMTECNOSTORE' },  { username: 'Baronguille356', password: 'noahemir12' },  { username: 'CaroPerfu', password: 'CaroP18' },  { username: 'brune2804', password: 'noahemir12' },  { username: 'Electro25', password: 'Keoyoliver25' },  { username: 'Rjotaimportados', password: 'Augustoangel' },];async function main() {  console.log('Seeding users...');  for (const user of users) {    const hashedPassword = await bcrypt.hash(user.password, 10);    const existingUser = await prisma.user.findUnique({      where: { username: user.username }    });    if (!existingUser) {      await prisma.user.create({        data: {          username: user.username,          password: hashedPassword,          isActive: true,        },      });      console.log(`User ${user.username} created.`);    } else {      console.log(`User ${user.username} already exists.`);    }  }}main()  .catch((e) => {    console.error(e);    process.exit(1);  })  .finally(async () => {    await prisma.$disconnect();  });
+const { PrismaClient } = require('@prisma/client');
+const bcrypt = require('bcrypt');
+const prisma = new PrismaClient();
+
+const users = [
+  { username: 'administrador', password: 'administrador' },
+  { username: 'administrador2', password: 'administrador2' },
+  { username: 'demo', password: 'demo' },
+  { username: 'El pollo loco', password: 'albano.210501' },
+  { username: 'CMTECNOSTORE', password: 'CMTECNOSTORE' },
+  { username: 'Baronguille356', password: 'noahemir12' },
+  { username: 'CaroPerfu', password: 'CaroP18' },
+  { username: 'brune2804', password: 'noahemir12' },
+  { username: 'Electro25', password: 'Keoyoliver25' },
+  { username: 'Rjotaimportados', password: 'Augustoangel' },
+];
+
+async function main() {
+  console.log('Seeding users...');
+  for (const user of users) {
+    const hashedPassword = await bcrypt.hash(user.password, 10);
+    const existingUser = await prisma.user.findUnique({
+      where: { username: user.username },
+    });
+    if (!existingUser) {
+      await prisma.user.create({
+        data: {
+          username: user.username,
+          password: hashedPassword,
+          isActive: true,
+        },
+      });
+      console.log(`User ${user.username} created.`);
+    } else {
+      console.log(`User ${user.username} already exists.`);
+    }
+  }
+}
+
+main()
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });

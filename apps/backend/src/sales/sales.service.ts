@@ -6,14 +6,14 @@ import { convertToBaseUnit, convertFromBaseUnit } from '../common/utils/unit-con
 export class SalesService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll(filters?: {
+  async findAll(userId: number, filters?: {
     dateFrom?: string;
     dateTo?: string;
     customerId?: string;
     credit?: string | boolean;
     priceListId?: string | number;
   }) {
-    const where: any = {};
+    const where: any = { userId };
     if (filters?.dateFrom || filters?.dateTo) {
       where.date = {};
       if (filters.dateFrom) {
@@ -48,9 +48,9 @@ export class SalesService {
     });
   }
 
-  async findOne(id: number) {
-    return this.prisma.sale.findUnique({
-      where: { id },
+  async findOne(id: number, userId: number) {
+    return this.prisma.sale.findFirst({
+      where: { id, userId },
       include: {
         customer: true,
         items: {
@@ -69,7 +69,7 @@ export class SalesService {
     });
   }
 
-  async create(data: any) {
+  async create(data: any, userId: number) {
     return this.prisma.$transaction(async (tx) => {
       const { 
         items, 
@@ -81,6 +81,7 @@ export class SalesService {
       } = data;
       
       const saleData = {
+        userId,
         total: Number(rest.total),
         date: rest.date ? new Date(rest.date) : new Date(),
         barcode: rest.barcode || null,
@@ -165,10 +166,10 @@ export class SalesService {
         }
       });
 
-      // 2. Update Product Stock
+      // 2. Update Product Stock (Filtered by userId)
       for (const item of items) {
-        const product = await tx.product.findUnique({
-          where: { id: Number(item.productId) }
+        const product = await tx.product.findFirst({
+          where: { id: Number(item.productId), userId }
         });
         
         if (product) {
@@ -184,25 +185,31 @@ export class SalesService {
         }
       }
 
-      // 3. Update Customer Balance
+      // 3. Update Customer Balance (Filtered by userId)
       if (saleData.credit && saleData.customerId) {
-        await tx.customer.update({
-          where: { id: saleData.customerId },
-          data: {
-            pendingBalance: {
-              increment: saleData.total
-            }
-          }
+        const customer = await tx.customer.findFirst({
+          where: { id: saleData.customerId, userId }
         });
+        if (customer) {
+          await tx.customer.update({
+            where: { id: customer.id },
+            data: {
+              pendingBalance: {
+                increment: saleData.total
+              }
+            }
+          });
+        }
       }
 
-      // 4. Create Daily Cash Movement
+      // 4. Create Daily Cash Movement (Filtered by userId)
       const today = new Date();
       const startOfDay = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0));
       const endOfDay = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 1, 0, 0, 0));
 
       let dailyCash = await tx.dailyCash.findFirst({
         where: {
+          userId,
           date: {
             gte: startOfDay,
             lt: endOfDay,
@@ -210,11 +217,10 @@ export class SalesService {
         }
       });
 
-      // If no daily cash exists for today, we might want to create one or handle it
-      // Usually the frontend ensures it's open, but let's be safe.
       if (!dailyCash) {
         dailyCash = await tx.dailyCash.create({
           data: {
+            userId,
             date: startOfDay,
             closed: false,
           }
@@ -249,14 +255,13 @@ export class SalesService {
     });
   }
 
-  async update(id: number, data: any) {
-    // Note: Update is more complex because we'd need to REVERSE previous side effects.
-    // For now, let's just keep the existing update logic but wrapped in transaction for safety.
-    // In a real app, you'd calculate the difference in stock/balance and apply it.
-    
+  async update(id: number, data: any, userId: number) {
+    // Ensure sale belongs to user
+    const existingSale = await this.findOne(id, userId);
+    if (!existingSale) throw new Error('Sale not found or access denied');
+
     const { items, payments, installments, editHistory, products, paymentMethods, ...rest } = data;
     
-    // Explicitly pick fields for update
     const saleData: any = {};
     if (rest.total !== undefined) saleData.total = Number(rest.total);
     if (rest.date !== undefined) saleData.date = new Date(rest.date);
@@ -275,20 +280,14 @@ export class SalesService {
 
     return this.prisma.$transaction(async (tx) => {
       if (editHistory) {
-        const currentSale = await tx.sale.findUnique({
-          where: { id },
-          select: { total: true },
+        await tx.saleEditHistory.create({
+          data: {
+            saleId: id,
+            changes: editHistory.changes,
+            previousTotal: existingSale.total,
+            newTotal: Number(data.total),
+          },
         });
-        if (currentSale) {
-          await tx.saleEditHistory.create({
-            data: {
-              saleId: id,
-              changes: editHistory.changes,
-              previousTotal: currentSale.total,
-              newTotal: Number(data.total),
-            },
-          });
-        }
       }
       
       await Promise.all([
@@ -370,7 +369,11 @@ export class SalesService {
     });
   }
 
-  async delete(id: number) {
+  async delete(id: number, userId: number) {
+    // Ensure sale belongs to user
+    const existingSale = await this.findOne(id, userId);
+    if (!existingSale) throw new Error('Sale not found or access denied');
+
     return this.prisma.sale.delete({
       where: { id },
     });

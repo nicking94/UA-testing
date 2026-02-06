@@ -8,6 +8,7 @@ import {
   Param,
   Query,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import { InstallmentsService } from './installments.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -18,50 +19,53 @@ export class InstallmentsController {
   constructor(private installmentsService: InstallmentsService) {}
 
   @Get()
-  findAll(@Query() query: any) {
-    return this.installmentsService.findAll(query);
+  findAll(@Req() req: any, @Query() query: any) {
+    return this.installmentsService.findAll(req.user.id, query);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.installmentsService.findOne(+id);
+  findOne(@Req() req: any, @Param('id') id: string) {
+    return this.installmentsService.findOne(+id, req.user.id);
   }
 
   @Post()
-  create(@Body() data: any) {
-    return this.installmentsService.create(data);
+  create(@Req() req: any, @Body() data: any) {
+    return this.installmentsService.create(data, req.user.id);
   }
 
   @Post('bulk')
-  createMany(@Body() data: any[]) {
-    return this.installmentsService.createMany(data);
+  createMany(@Req() req: any, @Body() data: any[]) {
+    return this.installmentsService.createMany(data, req.user.id);
   }
 
   @Post('pay-multiple')
   payMultiple(
+    @Req() req: any,
     @Body() data: { ids: number[]; paymentDate: Date; paymentMethod: string },
   ) {
     return this.installmentsService.payMultiple(
       data.ids,
-      { paymentDate: data.paymentDate, paymentMethod: data.paymentMethod }
+      { paymentDate: data.paymentDate, paymentMethod: data.paymentMethod },
+      req.user.id,
     );
   }
 
   @Put(':id')
-  update(@Param('id') id: string, @Body() data: any) {
-    return this.installmentsService.update(+id, data);
+  update(@Req() req: any, @Param('id') id: string, @Body() data: any) {
+    return this.installmentsService.update(+id, data, req.user.id);
   }
 
   @Put(':id/pay')
   markAsPaid(
+    @Req() req: any,
     @Param('id') id: string,
     @Body() paymentData: { paymentDate: Date; paymentMethod: string },
   ) {
-    return this.installmentsService.markAsPaid(+id, paymentData);
+    return this.installmentsService.markAsPaid(+id, paymentData, req.user.id);
   }
 
   @Delete(':id')
-  delete(@Param('id') id: string) {
-    return this.installmentsService.delete(+id);
+  delete(@Req() req: any, @Param('id') id: string) {
+    return this.installmentsService.delete(+id, req.user.id);
   }
 }

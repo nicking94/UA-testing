@@ -1,28 +1,43 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+
 @Injectable()
 export class UserPreferencesService {
   constructor(private prisma: PrismaService) {}
-  async findOne(userId?: number) {
-    const where = userId ? { userId } : {};
+
+  async findOne(userId: number) {
     return this.prisma.userPreferences.findFirst({
-      where,
+      where: { userId },
       orderBy: { id: 'desc' },
     });
   }
-  async create(data: any) {
-    return this.prisma.userPreferences.create({ data });
+
+  async create(data: any, userId: number) {
+    return this.prisma.userPreferences.create({
+      data: {
+        ...data,
+        userId,
+      },
+    });
   }
-  async update(id: number, data: any) {
+
+  async update(id: number, data: any, userId: number) {
     if (isNaN(id)) {
       throw new Error('Invalid ID provided for update');
     }
+    // Ensure access
+    const existing = await this.prisma.userPreferences.findFirst({
+      where: { id, userId },
+    });
+    if (!existing) throw new Error('User preferences not found or access denied');
+
     return this.prisma.userPreferences.update({ where: { id }, data });
   }
-  async upsert(data: any) {
-    const { userId, ...rest } = data;
+
+  async upsert(data: any, userId: number) {
+    const { userId: _, ...rest } = data;
     const existing = await this.prisma.userPreferences.findFirst({
-      where: userId ? { userId } : undefined,
+      where: { userId },
       orderBy: { id: 'desc' },
     });
 

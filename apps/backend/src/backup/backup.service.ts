@@ -5,7 +5,7 @@ import { PrismaService } from '@/prisma/prisma.service';
 export class BackupService {
   constructor(private prisma: PrismaService) {}
 
-  async export() {
+  async export(userId: number) {
     try {
       const [
         products,
@@ -25,28 +25,37 @@ export class BackupService {
         priceLists,
         productPrices,
       ] = await Promise.all([
-        this.prisma.product.findMany(),
-        this.prisma.customer.findMany(),
-        this.prisma.supplier.findMany(),
+        this.prisma.product.findMany({ where: { userId } }),
+        this.prisma.customer.findMany({ where: { userId } }),
+        this.prisma.supplier.findMany({ where: { userId } }),
         this.prisma.sale.findMany({
+          where: { userId },
           include: { items: true, installments: true },
         }),
-        this.prisma.payment.findMany(),
+        this.prisma.payment.findMany({
+          where: { sale: { userId } }
+        }),
         this.prisma.dailyCash.findMany({
+          where: { userId },
           include: { movements: true },
         }),
-        this.prisma.expense.findMany(),
+        this.prisma.expense.findMany({ where: { userId } }),
         this.prisma.budget.findMany({
+          where: { userId },
           include: { items: true },
         }),
-        this.prisma.promotion.findMany(),
-        this.prisma.businessData.findMany(),
-        this.prisma.userPreferences.findMany(),
-        this.prisma.expenseCategory.findMany(),
-        this.prisma.customCategory.findMany(),
-        this.prisma.productReturn.findMany(),
-        this.prisma.priceList.findMany(),
-        this.prisma.productPrice.findMany(),
+        this.prisma.promotion.findMany({ where: { userId } }),
+        this.prisma.businessData.findMany({ where: { userId } }),
+        this.prisma.userPreferences.findMany({ where: { userId } }),
+        this.prisma.expenseCategory.findMany({ where: { userId } }),
+        this.prisma.customCategory.findMany({ where: { userId } }),
+        this.prisma.productReturn.findMany({
+          where: { product: { userId } }
+        }),
+        this.prisma.priceList.findMany({ where: { userId } }),
+        this.prisma.productPrice.findMany({
+          where: { product: { userId } }
+        }),
       ]);
 
       return {
@@ -67,7 +76,7 @@ export class BackupService {
         priceLists,
         productPrices,
         exportedAt: new Date().toISOString(),
-        version: '2.0.0',
+        version: '3.0.0', // Bump version for multi-tenancy
       };
     } catch (error) {
       throw new InternalServerErrorException(
@@ -76,101 +85,118 @@ export class BackupService {
     }
   }
 
-  async import(data: any) {
+  async import(data: any, userId: number) {
     return this.prisma.$transaction(
       async (tx) => {
         try {
-          // Clear all relevant tables first (reversing relationship order)
-          await tx.dailyCashMovement.deleteMany({});
-          await tx.saleItem.deleteMany({});
-          await tx.installment.deleteMany({});
-          await tx.payment.deleteMany({});
-          await tx.budgetItem.deleteMany({});
-          await tx.productPrice.deleteMany({});
-          await tx.supplierProduct.deleteMany({});
+          // 1. Clear current user's data first (reversing relationship order)
+          // We must be careful to only delete data belonging to this userId.
+          
+          await tx.dailyCashMovement.deleteMany({ where: { dailyCash: { userId } } });
+          await tx.saleItem.deleteMany({ where: { sale: { userId } } });
+          await tx.installment.deleteMany({ where: { sale: { userId } } });
+          await tx.payment.deleteMany({ where: { sale: { userId } } });
+          await tx.budgetItem.deleteMany({ where: { budget: { userId } } });
+          await tx.productPrice.deleteMany({ where: { product: { userId } } });
+          await tx.supplierProduct.deleteMany({ where: { supplier: { userId } } });
 
           // Main tables
-          await tx.sale.deleteMany({});
-          await tx.dailyCash.deleteMany({});
-          await tx.budget.deleteMany({});
-          await tx.expense.deleteMany({});
-          await tx.expenseCategory.deleteMany({});
-          await tx.productReturn.deleteMany({});
-          await tx.promotion.deleteMany({});
-          await tx.product.deleteMany({});
-          await tx.customer.deleteMany({});
-          await tx.supplier.deleteMany({});
-          await tx.priceList.deleteMany({});
-          await tx.customCategory.deleteMany({});
-          await tx.businessData.deleteMany({});
+          await tx.sale.deleteMany({ where: { userId } });
+          await tx.dailyCash.deleteMany({ where: { userId } });
+          await tx.budget.deleteMany({ where: { userId } });
+          await tx.expense.deleteMany({ where: { userId } });
+          await tx.expenseCategory.deleteMany({ where: { userId } });
+          await tx.productReturn.deleteMany({ where: { product: { userId } } });
+          await tx.promotion.deleteMany({ where: { userId } });
+          await tx.product.deleteMany({ where: { userId } });
+          await tx.customer.deleteMany({ where: { userId } });
+          await tx.supplier.deleteMany({ where: { userId } });
+          await tx.priceList.deleteMany({ where: { userId } });
+          await tx.customCategory.deleteMany({ where: { userId } });
+          await tx.businessData.deleteMany({ where: { userId } });
+          await tx.userPreferences.deleteMany({ where: { userId } });
 
           // Helper to handle dates
           const ensureDate = (d: any) => (d ? new Date(d) : null);
 
-          // Import Business Data
+          // 2. Import data Ensured with userId
+          
           if (data.businessData) {
-            await tx.businessData.createMany({ data: data.businessData });
+            await tx.businessData.createMany({ 
+              data: data.businessData.map((d: any) => ({ ...d, userId, id: undefined })) 
+            });
           }
 
-          // Import Customers
+          if (data.userPreferences) {
+            await tx.userPreferences.createMany({ 
+              data: data.userPreferences.map((d: any) => ({ ...d, userId, id: undefined })) 
+            });
+          }
+
           if (data.customers) {
-            await tx.customer.createMany({ data: data.customers });
+            await tx.customer.createMany({ 
+              data: data.customers.map((d: any) => ({ ...d, userId })) 
+            });
           }
 
-          // Import Suppliers
           if (data.suppliers) {
             await tx.supplier.createMany({
               data: data.suppliers.map((s: any) => ({
                 ...s,
+                userId,
+                id: undefined,
                 createdAt: ensureDate(s.createdAt),
                 updatedAt: ensureDate(s.updatedAt),
               })),
             });
           }
 
-          // Import Products
           if (data.products) {
             await tx.product.createMany({
               data: data.products.map((p: any) => ({
                 ...p,
+                userId,
+                id: undefined,
                 createdAt: ensureDate(p.createdAt),
                 updatedAt: ensureDate(p.updatedAt),
               })),
             });
           }
 
-          // Import Price Lists
           if (data.priceLists) {
-            await tx.priceList.createMany({ data: data.priceLists });
-          }
-
-          // Import Product Prices
-          if (data.productPrices) {
-            await tx.productPrice.createMany({ data: data.productPrices });
-          }
-
-          // Import Expense Categories
-          if (data.expenseCategories) {
-            await tx.expenseCategory.createMany({
-              data: data.expenseCategories,
+            await tx.priceList.createMany({ 
+              data: data.priceLists.map((d: any) => ({ ...d, userId, id: undefined })) 
             });
           }
 
-          // Import Sales & Related
+          if (data.productPrices) {
+            await tx.productPrice.createMany({ 
+              data: data.productPrices.map((d: any) => ({ ...d, id: undefined })) 
+            });
+          }
+
+          if (data.expenseCategories) {
+            await tx.expenseCategory.createMany({
+              data: data.expenseCategories.map((d: any) => ({ ...d, userId, id: undefined })),
+            });
+          }
+
           if (data.sales) {
             for (const sale of data.sales) {
-              const { items, installments, ...saleData } = sale;
+              const { items, installments, id, ...saleData } = sale;
               await tx.sale.create({
                 data: {
                   ...saleData,
+                  userId,
                   date: ensureDate(saleData.date),
                   createdAt: ensureDate(saleData.createdAt),
                   updatedAt: ensureDate(saleData.updatedAt),
-                  items: items ? { create: items } : undefined,
+                  items: items ? { create: items.map((it: any) => ({ ...it, id: undefined })) } : undefined,
                   installments: installments
                     ? {
                         create: installments.map((inst: any) => ({
                           ...inst,
+                          id: undefined,
                           dueDate: ensureDate(inst.dueDate),
                           paymentDate: ensureDate(inst.paymentDate),
                           createdAt: ensureDate(inst.createdAt),
@@ -183,11 +209,11 @@ export class BackupService {
             }
           }
 
-          // Import Payments
           if (data.payments) {
             await tx.payment.createMany({
               data: data.payments.map((p: any) => ({
                 ...p,
+                id: undefined,
                 date: ensureDate(p.date),
                 createdAt: ensureDate(p.createdAt),
                 updatedAt: ensureDate(p.updatedAt),
@@ -195,13 +221,13 @@ export class BackupService {
             });
           }
 
-          // Import Daily Cash & Movements
           if (data.dailyCash) {
             for (const cash of data.dailyCash) {
-              const { movements, ...cashData } = cash;
+              const { movements, id, ...cashData } = cash;
               await tx.dailyCash.create({
                 data: {
                   ...cashData,
+                  userId,
                   date: ensureDate(cashData.date),
                   closingDate: ensureDate(cashData.closingDate),
                   createdAt: ensureDate(cashData.createdAt),
@@ -210,6 +236,7 @@ export class BackupService {
                     ? {
                         create: movements.map((m: any) => ({
                           ...m,
+                          id: undefined,
                           date: ensureDate(m.date),
                           createdAt: ensureDate(m.createdAt),
                           timestamp: ensureDate(m.timestamp),
@@ -221,11 +248,12 @@ export class BackupService {
             }
           }
 
-          // Import Expenses
           if (data.expenses) {
             await tx.expense.createMany({
               data: data.expenses.map((e: any) => ({
                 ...e,
+                userId,
+                id: undefined,
                 date: ensureDate(e.date),
                 createdAt: ensureDate(e.createdAt),
                 updatedAt: ensureDate(e.updatedAt),
@@ -233,15 +261,15 @@ export class BackupService {
             });
           }
 
-          // Import Budgets
           if (data.budgets) {
             for (const budget of data.budgets) {
-              const { items, ...budgetData } = budget;
+              const { items, id, ...budgetData } = budget;
               await tx.budget.create({
                 data: {
                   ...budgetData,
+                  userId,
                   date: ensureDate(budgetData.date),
-                  items: items ? { create: items } : undefined,
+                  items: items ? { create: items.map((it: any) => ({ ...it, id: undefined })) } : undefined,
                 },
               });
             }
@@ -254,7 +282,7 @@ export class BackupService {
         }
       },
       {
-        timeout: 30000,
+        timeout: 60000,
       },
     );
   }

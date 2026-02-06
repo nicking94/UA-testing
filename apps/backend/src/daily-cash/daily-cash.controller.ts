@@ -6,6 +6,7 @@ import {
   Body,
   Param,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import { DailyCashService } from './daily-cash.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -16,27 +17,27 @@ export class DailyCashController {
   constructor(private dailyCashService: DailyCashService) {}
 
   @Get()
-  findAll() {
-    return this.dailyCashService.findAll();
+  findAll(@Req() req: any) {
+    return this.dailyCashService.findAll(req.user.id);
   }
 
   @Get('date/:date')
-  findByDate(@Param('date') date: string) {
-    return this.dailyCashService.findByDate(date);
+  findByDate(@Req() req: any, @Param('date') date: string) {
+    return this.dailyCashService.findByDate(date, req.user.id);
   }
 
   @Post()
-  create(@Body() data: any) {
-    return this.dailyCashService.create(data);
+  create(@Req() req: any, @Body() data: any) {
+    return this.dailyCashService.create(data, req.user.id);
   }
 
   @Put(':id')
-  update(@Param('id') id: string, @Body() data: any) {
-    return this.dailyCashService.update(+id, data);
+  update(@Req() req: any, @Param('id') id: string, @Body() data: any) {
+    return this.dailyCashService.update(+id, data, req.user.id);
   }
 
   @Put(':id/close')
-  close(@Param('id') id: string, @Body() data: any) {
-    return this.dailyCashService.close(+id, data);
+  close(@Req() req: any, @Param('id') id: string, @Body() data: any) {
+    return this.dailyCashService.close(+id, data, req.user.id);
   }
 }

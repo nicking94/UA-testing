@@ -6,12 +6,12 @@ import { Rubro } from '@prisma/client';
 export class ProductsService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll(filters?: {
+  async findAll(userId: number, filters?: {
     rubro?: Rubro;
     search?: string;
     minStock?: number;
   }) {
-    const where: any = {};
+    const where: any = { userId };
     if (filters?.rubro && filters.rubro !== 'Todos_los_rubros') {
       where.rubro = filters.rubro;
     }
@@ -38,9 +38,9 @@ export class ProductsService {
     });
   }
 
-  async findOne(id: number) {
-    return this.prisma.product.findUnique({
-      where: { id },
+  async findOne(id: number, userId: number) {
+    return this.prisma.product.findFirst({
+      where: { id, userId },
       include: {
         productPrices: {
           include: {
@@ -52,9 +52,9 @@ export class ProductsService {
     });
   }
 
-  async findByBarcode(barcode: string) {
-    return this.prisma.product.findUnique({
-      where: { barcode },
+  async findByBarcode(barcode: string, userId: number) {
+    return this.prisma.product.findFirst({
+      where: { barcode, userId },
       include: {
         productPrices: {
           include: {
@@ -65,11 +65,12 @@ export class ProductsService {
     });
   }
 
-  async create(data: any) {
+  async create(data: any, userId: number) {
     const { customCategories, productPrices, ...productData } = data;
     return this.prisma.product.create({
       data: {
         ...productData,
+        userId,
         customCategories: customCategories
           ? {
               create: customCategories.map((cat: any) => ({
@@ -99,8 +100,13 @@ export class ProductsService {
     });
   }
 
-  async update(id: number, data: any) {
+  async update(id: number, data: any, userId: number) {
     const { customCategories, productPrices, ...productData } = data;
+    
+    // Ensure product belongs to user
+    const product = await this.findOne(id, userId);
+    if (!product) throw new Error('Product not found or access denied');
+
     if (customCategories !== undefined) {
       await this.prisma.productCustomCategory.deleteMany({
         where: { productId: id },
@@ -140,13 +146,21 @@ export class ProductsService {
     });
   }
 
-  async delete(id: number) {
+  async delete(id: number, userId: number) {
+    // Ensure product belongs to user
+    const product = await this.findOne(id, userId);
+    if (!product) throw new Error('Product not found or access denied');
+
     return this.prisma.product.delete({
       where: { id },
     });
   }
 
-  async updateStock(id: number, stock: number) {
+  async updateStock(id: number, stock: number, userId: number) {
+    // Ensure product belongs to user
+    const product = await this.findOne(id, userId);
+    if (!product) throw new Error('Product not found or access denied');
+
     return this.prisma.product.update({
       where: { id },
       data: { stock },

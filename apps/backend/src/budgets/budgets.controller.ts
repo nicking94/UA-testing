@@ -8,6 +8,7 @@ import {
   Param,
   Query,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import { BudgetsService } from './budgets.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -18,27 +19,27 @@ export class BudgetsController {
   constructor(private budgetsService: BudgetsService) {}
 
   @Get()
-  findAll(@Query() query: any) {
-    return this.budgetsService.findAll(query);
+  findAll(@Req() req: any, @Query() query: any) {
+    return this.budgetsService.findAll(req.user.id, query);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.budgetsService.findOne(id);
+  findOne(@Req() req: any, @Param('id') id: string) {
+    return this.budgetsService.findOne(id, req.user.id);
   }
 
   @Post()
-  create(@Body() data: any) {
-    return this.budgetsService.create(data);
+  create(@Req() req: any, @Body() data: any) {
+    return this.budgetsService.create(data, req.user.id);
   }
 
   @Put(':id')
-  update(@Param('id') id: string, @Body() data: any) {
-    return this.budgetsService.update(id, data);
+  update(@Req() req: any, @Param('id') id: string, @Body() data: any) {
+    return this.budgetsService.update(id, data, req.user.id);
   }
 
   @Delete(':id')
-  delete(@Param('id') id: string) {
-    return this.budgetsService.delete(id);
+  delete(@Req() req: any, @Param('id') id: string) {
+    return this.budgetsService.delete(id, req.user.id);
   }
 }

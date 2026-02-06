@@ -5,8 +5,8 @@ import {
   Put,
   Body,
   Param,
-  Query,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import { UserPreferencesService } from './user-preferences.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -17,22 +17,22 @@ export class UserPreferencesController {
   constructor(private userPreferencesService: UserPreferencesService) {}
 
   @Get()
-  findOne(@Query('userId') userId?: string) {
-    return this.userPreferencesService.findOne(userId ? +userId : undefined);
+  findOne(@Req() req: any) {
+    return this.userPreferencesService.findOne(req.user.id);
   }
 
   @Post()
-  create(@Body() data: any) {
-    return this.userPreferencesService.create(data);
+  create(@Req() req: any, @Body() data: any) {
+    return this.userPreferencesService.create(data, req.user.id);
   }
 
   @Put('upsert')
-  upsert(@Body() data: any) {
-    return this.userPreferencesService.upsert(data);
+  upsert(@Req() req: any, @Body() data: any) {
+    return this.userPreferencesService.upsert(data, req.user.id);
   }
 
   @Put(':id')
-  update(@Param('id') id: string, @Body() data: any) {
-    return this.userPreferencesService.update(+id, data);
+  update(@Req() req: any, @Param('id') id: string, @Body() data: any) {
+    return this.userPreferencesService.update(+id, data, req.user.id);
   }
 }

@@ -5,12 +5,12 @@ import { PrismaService } from '../prisma/prisma.service';
 export class ExpensesService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll(filters?: {
+  async findAll(userId: number, filters?: {
     dateFrom?: string;
     dateTo?: string;
     type?: string;
   }) {
-    const where: any = {};
+    const where: any = { userId };
     if (filters?.dateFrom || filters?.dateTo) {
       where.date = {};
       if (filters.dateFrom) where.date.gte = new Date(filters.dateFrom);
@@ -20,19 +20,24 @@ export class ExpensesService {
     return this.prisma.expense.findMany({ where, orderBy: { date: 'desc' } });
   }
 
-  async create(data: any) {
+  async create(data: any, userId: number) {
     return this.prisma.$transaction(async (tx) => {
       const expense = await tx.expense.create({
-        data: { ...data, date: new Date(data.date) },
+        data: { 
+          ...data, 
+          userId,
+          date: new Date(data.date) 
+        },
       });
 
-      // Create Daily Cash Movement
+      // Create Daily Cash Movement (Filtered by userId)
       const today = new Date();
       const startOfDay = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0));
       const endOfDay = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 1, 0, 0, 0));
 
       let dailyCash = await tx.dailyCash.findFirst({
         where: {
+          userId,
           date: {
             gte: startOfDay,
             lt: endOfDay,
@@ -43,6 +48,7 @@ export class ExpensesService {
       if (!dailyCash) {
         dailyCash = await tx.dailyCash.create({
           data: {
+            userId,
             date: startOfDay,
             closed: false,
           }
@@ -67,15 +73,17 @@ export class ExpensesService {
     });
   }
 
-  async update(id: number, data: any) {
-    // Updates are complex because they might affect movements.
-    // For now, we update the expense itself.
+  async update(id: number, data: any, userId: number) {
+    // Ensure access
+    const existing = await this.prisma.expense.findFirst({ where: { id, userId } });
+    if (!existing) throw new Error('Expense not found or access denied');
+
     return this.prisma.expense.update({ where: { id }, data });
   }
 
-  async delete(id: number) {
+  async delete(id: number, userId: number) {
     return this.prisma.$transaction(async (tx) => {
-      const expense = await tx.expense.findUnique({ where: { id } });
+      const expense = await tx.expense.findFirst({ where: { id, userId } });
       if (!expense) return null;
 
       // Delete associated cash movements

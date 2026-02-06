@@ -6,12 +6,14 @@ import { convertToBaseUnit } from '../common/utils/unit-conversion';
 export class ProductReturnsService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll(filters?: {
+  async findAll(userId: number, filters?: {
     productId?: number;
     dateFrom?: string;
     dateTo?: string;
   }) {
-    const where: any = {};
+    const where: any = {
+      product: { userId }
+    };
     if (filters?.productId) where.productId = filters.productId;
     if (filters?.dateFrom || filters?.dateTo) {
       where.date = {};
@@ -27,17 +29,26 @@ export class ProductReturnsService {
     });
   }
 
-  async findOne(id: number) {
-    return this.prisma.productReturn.findUnique({
-      where: { id },
+  async findOne(id: number, userId: number) {
+    return this.prisma.productReturn.findFirst({
+      where: { 
+        id,
+        product: { userId }
+      },
       include: {
         product: true,
       },
     });
   }
 
-  async create(data: any) {
+  async create(data: any, userId: number) {
     return this.prisma.$transaction(async (tx) => {
+      // Ensure product belongs to user
+      const product = await tx.product.findFirst({
+        where: { id: data.productId, userId }
+      });
+      if (!product) throw new Error('Product not found or access denied');
+
       // 1. Create the return record
       const productReturn = await tx.productReturn.create({
         data: {
@@ -50,7 +61,6 @@ export class ProductReturnsService {
       });
 
       // 2. Update Product Stock (Increase stock)
-      const product = productReturn.product;
       const quantityInBase = convertToBaseUnit(productReturn.stockAdded, (productReturn.unit as string) || (product.unit as string));
       
       await tx.product.update({
@@ -63,7 +73,6 @@ export class ProductReturnsService {
       });
 
       // 3. Create Daily Cash Movement (EGRESO for the refund)
-      // We use 'amount' field from ProductReturn as the refund amount
       const refundAmount = productReturn.amount || 0;
       if (refundAmount > 0) {
         const today = new Date();
@@ -72,6 +81,7 @@ export class ProductReturnsService {
 
         let dailyCash = await tx.dailyCash.findFirst({
           where: {
+            userId,
             date: {
               gte: startOfDay,
               lt: endOfDay,
@@ -82,6 +92,7 @@ export class ProductReturnsService {
         if (!dailyCash) {
           dailyCash = await tx.dailyCash.create({
             data: {
+              userId,
               date: startOfDay,
               closed: false,
             }
@@ -101,7 +112,7 @@ export class ProductReturnsService {
             costPrice: product.costPrice,
             sellPrice: product.price,
             quantity: productReturn.stockAdded,
-            profit: productReturn.profit, // Use calculated profit from return
+            profit: productReturn.profit,
             unit: (productReturn.unit as any) || (product.unit as any),
             productReturnId: productReturn.id,
           }
@@ -112,7 +123,11 @@ export class ProductReturnsService {
     });
   }
 
-  async update(id: number, data: any) {
+  async update(id: number, data: any, userId: number) {
+    // Ensure access
+    const existing = await this.findOne(id, userId);
+    if (!existing) throw new Error('Product return not found or access denied');
+
     return this.prisma.productReturn.update({
       where: { id },
       data,
@@ -122,10 +137,10 @@ export class ProductReturnsService {
     });
   }
 
-  async delete(id: number) {
+  async delete(id: number, userId: number) {
     return this.prisma.$transaction(async (tx) => {
-      const productReturn = await tx.productReturn.findUnique({
-        where: { id },
+      const productReturn = await tx.productReturn.findFirst({
+        where: { id, product: { userId } },
         include: { product: true }
       });
 

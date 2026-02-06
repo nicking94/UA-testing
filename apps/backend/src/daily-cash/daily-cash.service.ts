@@ -5,17 +5,15 @@ import { PrismaService } from '../prisma/prisma.service';
 export class DailyCashService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll() {
+  async findAll(userId: number) {
     return this.prisma.dailyCash.findMany({
+      where: { userId },
       include: { movements: true },
       orderBy: { date: 'desc' },
     });
   }
 
-  async findByDate(date: string) {
-    // When querying a @db.Date with Prisma, we should use a Date object.
-    // To be safe across timezones, we can query for the date part.
-    // If 'date' is YYYY-MM-DD, new Date(date) is UTC midnight.
+  async findByDate(date: string, userId: number) {
     const searchDate = new Date(date);
     const year = searchDate.getUTCFullYear();
     const month = searchDate.getUTCMonth();
@@ -23,6 +21,7 @@ export class DailyCashService {
 
     return this.prisma.dailyCash.findFirst({
       where: { 
+        userId,
         date: {
           gte: new Date(Date.UTC(year, month, day, 0, 0, 0)),
           lt: new Date(Date.UTC(year, month, day + 1, 0, 0, 0)),
@@ -68,12 +67,10 @@ export class DailyCashService {
     };
   }
 
-  async create(data: any) {
+  async create(data: any, userId: number) {
     const { id, movements, ...rest } = data;
     const date = rest.date ? new Date(rest.date) : new Date();
     
-    // Check if a daily cash for this date already exists to avoid 500
-    // We can use the date part only for comparison
     const year = date.getUTCFullYear();
     const month = date.getUTCMonth();
     const day = date.getUTCDate();
@@ -82,6 +79,7 @@ export class DailyCashService {
 
     const existing = await this.prisma.dailyCash.findFirst({
       where: {
+        userId,
         date: {
           gte: startOfDay,
           lt: endOfDay,
@@ -90,17 +88,16 @@ export class DailyCashService {
     });
 
     if (existing) {
-      // If it exists, return it instead of crashing, or update it
-      // For "Abrir Caja", returning the existing one is usually what's expected if it's already there
-      return this.prisma.dailyCash.findUnique({
-        where: { id: existing.id },
+      return this.prisma.dailyCash.findFirst({
+        where: { id: existing.id, userId },
         include: { movements: true }
       });
     }
 
     return this.prisma.dailyCash.create({
       data: {
-        date: startOfDay, // Store exactly at midnight UTC for consistency
+        userId,
+        date: startOfDay,
         closed: rest.closed === true,
         closingAmount: rest.closingAmount !== undefined ? (isNaN(Number(rest.closingAmount)) ? 0 : Number(rest.closingAmount)) : null,
         closingDate: rest.closingDate ? new Date(rest.closingDate) : null,
@@ -125,7 +122,11 @@ export class DailyCashService {
     });
   }
 
-  async update(id: number, data: any) {
+  async update(id: number, data: any, userId: number) {
+    // Ensure access
+    const existing = await this.prisma.dailyCash.findFirst({ where: { id, userId } });
+    if (!existing) throw new Error('Daily cash not found or access denied');
+
     const { id: _, movements, updatedAt, createdAt, ...rest } = data;
     
     const updateData: any = {
@@ -163,7 +164,11 @@ export class DailyCashService {
     });
   }
 
-  async close(id: number, data: any) {
+  async close(id: number, data: any, userId: number) {
+    // Ensure access
+    const existing = await this.prisma.dailyCash.findFirst({ where: { id, userId } });
+    if (!existing) throw new Error('Daily cash not found or access denied');
+
     try {
       const closingAmount = Number(data.closingAmount);
       const closingDifference = Number(data.closingDifference || 0);

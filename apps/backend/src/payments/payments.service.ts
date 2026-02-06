@@ -5,13 +5,15 @@ import { PrismaService } from '../prisma/prisma.service';
 export class PaymentsService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll(filters?: {
+  async findAll(userId: number, filters?: {
     saleId?: number;
     customerId?: string;
     dateFrom?: string;
     dateTo?: string;
   }) {
-    const where: any = {};
+    const where: any = {
+      sale: { userId } // Filter by sale's userId
+    };
     if (filters?.saleId) where.saleId = filters.saleId;
     if (filters?.customerId) where.customerId = filters.customerId;
     if (filters?.dateFrom || filters?.dateTo) {
@@ -26,114 +28,142 @@ export class PaymentsService {
     });
   }
 
-  async create(data: any) {
+  async findOne(id: number, userId: number) {
+    return this.prisma.payment.findFirst({
+      where: { 
+        id,
+        sale: { userId }
+      },
+      include: { sale: true, customer: true }
+    });
+  }
+
+  async create(data: any, userId: number) {
     return this.prisma.$transaction(async (tx) => {
+      // Ensure Sale belongs to User
+      const sale = await tx.sale.findFirst({
+        where: { id: data.saleId, userId },
+        include: { payments: true, items: true }
+      });
+      if (!sale) throw new Error('Sale not found or access denied');
+
       const payment = await tx.payment.create({ data });
 
-      // 1. Update Customer Balance (only if NOT a cheque)
+      // 1. Update Customer Balance (only if NOT a cheque) (Filtered by userId)
       if (payment.customerId && payment.method !== 'CHEQUE') {
-        await tx.customer.update({
-          where: { id: payment.customerId },
-          data: {
-            pendingBalance: {
-              decrement: payment.amount
-            }
-          }
+        const customer = await tx.customer.findFirst({
+          where: { id: payment.customerId, userId }
         });
+        if (customer) {
+          await tx.customer.update({
+            where: { id: customer.id },
+            data: {
+              pendingBalance: {
+                decrement: payment.amount
+              }
+            }
+          });
+        }
       }
 
       // 2. Update Sale Status
-      const sale = await tx.sale.findUnique({
-        where: { id: payment.saleId },
-        include: { payments: true, items: true }
-      });
+      // Cheques only count as paid when cleared
+      const updatedPayments = await tx.payment.findMany({ where: { saleId: sale.id } });
+      const totalPaid = updatedPayments.reduce((sum, p) => {
+        if (p.method === 'CHEQUE' && p.checkStatus !== 'cobrado') return sum;
+        return sum + p.amount;
+      }, 0);
 
-      if (sale) {
-        // Cheques only count as paid when cleared
-        const totalPaid = sale.payments.reduce((sum, p) => {
-          if (p.method === 'CHEQUE' && p.checkStatus !== 'cobrado') return sum;
-          return sum + p.amount;
-        }, 0);
+      if (totalPaid >= sale.total - 0.01) {
+        await tx.sale.update({
+          where: { id: sale.id },
+          data: { paid: true }
+        });
+      }
 
-        if (totalPaid >= sale.total - 0.01) {
-          await tx.sale.update({
-            where: { id: sale.id },
-            data: { paid: true }
-          });
-        }
+      // 3. Create Daily Cash Movement (only if NOT a cheque) (Filtered by userId)
+      if (payment.method !== 'CHEQUE') {
+        const today = new Date();
+        const startOfDay = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0));
+        const endOfDay = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 1, 0, 0, 0));
 
-        // 3. Create Daily Cash Movement (only if NOT a cheque)
-        if (payment.method !== 'CHEQUE') {
-          const today = new Date();
-          const startOfDay = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0));
-          const endOfDay = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 1, 0, 0, 0));
-
-          let dailyCash = await tx.dailyCash.findFirst({
-            where: {
-              date: {
-                gte: startOfDay,
-                lt: endOfDay,
-              }
+        let dailyCash = await tx.dailyCash.findFirst({
+          where: {
+            userId,
+            date: {
+              gte: startOfDay,
+              lt: endOfDay,
             }
-          });
-
-          if (!dailyCash) {
-            dailyCash = await tx.dailyCash.create({
-              data: {
-                date: startOfDay,
-                closed: false,
-              }
-            });
           }
+        });
 
-          // Calculate profit for this payment
-          const totalCost = (sale.items as any[]).reduce((sum, item) => sum + (item.costPrice || 0) * item.quantity, 0);
-          const totalProfitSale = sale.total - totalCost;
-          const paymentRatio = payment.amount / sale.total;
-          const paymentProfit = totalProfitSale * paymentRatio;
-
-          await tx.dailyCashMovement.create({
+        if (!dailyCash) {
+          dailyCash = await tx.dailyCash.create({
             data: {
-              dailyCashId: dailyCash.id,
-              amount: payment.amount,
-              description: `Cobro - ${payment.customerName || 'Cliente'} (Venta #${sale.id})`,
-              type: "INGRESO",
-              date: payment.date,
-              paymentMethod: payment.method,
-              customerName: payment.customerName,
-              customerId: payment.customerId,
-              paymentId: payment.id,
-              originalSaleId: sale.id,
-              profit: paymentProfit,
+              userId,
+              date: startOfDay,
+              closed: false,
             }
           });
         }
+
+        // Calculate profit for this payment
+        const totalCost = (sale.items as any[]).reduce((sum, item) => sum + (item.costPrice || 0) * item.quantity, 0);
+        const totalProfitSale = sale.total - totalCost;
+        const paymentRatio = payment.amount / sale.total;
+        const paymentProfit = totalProfitSale * paymentRatio;
+
+        await tx.dailyCashMovement.create({
+          data: {
+            dailyCashId: dailyCash.id,
+            amount: payment.amount,
+            description: `Cobro - ${payment.customerName || 'Cliente'} (Venta #${sale.id})`,
+            type: "INGRESO",
+            date: payment.date,
+            paymentMethod: payment.method,
+            customerName: payment.customerName,
+            customerId: payment.customerId,
+            paymentId: payment.id,
+            originalSaleId: sale.id,
+            profit: paymentProfit,
+          }
+        });
       }
 
       return payment;
     });
   }
 
-  async update(id: number, data: any) {
+  async update(id: number, data: any, userId: number) {
     return this.prisma.$transaction(async (tx) => {
-      const oldPayment = await tx.payment.findUnique({ where: { id } });
-      if (!oldPayment) throw new Error('Payment not found');
+      const oldPayment = await tx.payment.findFirst({ 
+        where: { 
+          id,
+          sale: { userId }
+        } 
+      });
+      if (!oldPayment) throw new Error('Payment not found or access denied');
 
       const updatedPayment = await tx.payment.update({ where: { id }, data });
 
       // Handle transition of cheque to cobrado
       if (oldPayment.method === 'CHEQUE' && oldPayment.checkStatus !== 'cobrado' && updatedPayment.checkStatus === 'cobrado') {
-        // 1. Update Customer Balance
+        // 1. Update Customer Balance (Filtered by userId)
         if (updatedPayment.customerId) {
-          await tx.customer.update({
-            where: { id: updatedPayment.customerId },
-            data: { pendingBalance: { decrement: updatedPayment.amount } }
+          const customer = await tx.customer.findFirst({
+            where: { id: updatedPayment.customerId, userId }
           });
+          if (customer) {
+            await tx.customer.update({
+              where: { id: customer.id },
+              data: { pendingBalance: { decrement: updatedPayment.amount } }
+            });
+          }
         }
 
         // 2. Update Sale Status
-        const sale = await tx.sale.findUnique({
-          where: { id: updatedPayment.saleId },
+        const sale = await tx.sale.findFirst({
+          where: { id: updatedPayment.saleId, userId },
           include: { payments: true, items: true }
         });
 
@@ -150,18 +180,18 @@ export class PaymentsService {
             });
           }
 
-          // 3. Create Daily Cash Movement
+          // 3. Create Daily Cash Movement (Filtered by userId)
           const today = new Date();
           const startOfDay = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0));
           const endOfDay = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 1, 0, 0, 0));
 
           let dailyCash = await tx.dailyCash.findFirst({
-            where: { date: { gte: startOfDay, lt: endOfDay } }
+            where: { userId, date: { gte: startOfDay, lt: endOfDay } }
           });
 
           if (!dailyCash) {
             dailyCash = await tx.dailyCash.create({
-              data: { date: startOfDay, closed: false }
+              data: { userId, date: startOfDay, closed: false }
             });
           }
 
@@ -192,26 +222,33 @@ export class PaymentsService {
     });
   }
 
-  async delete(id: number) {
+  async delete(id: number, userId: number) {
     return this.prisma.$transaction(async (tx) => {
-      const payment = await tx.payment.findUnique({
-        where: { id },
+      const payment = await tx.payment.findFirst({
+        where: { 
+          id,
+          sale: { userId }
+        },
         include: { sale: true }
       });
 
       if (!payment) return null;
 
-      // 1. Revert Customer Balance (if it was already decremented)
+      // 1. Revert Customer Balance (if it was already decremented) (Filtered by userId)
       if (payment.customerId && (payment.method !== 'CHEQUE' || payment.checkStatus === 'cobrado')) {
-        await tx.customer.update({
-          where: { id: payment.customerId },
-          data: { pendingBalance: { increment: payment.amount } }
+        const customer = await tx.customer.findFirst({
+          where: { id: payment.customerId, userId }
         });
+        if (customer) {
+          await tx.customer.update({
+            where: { id: customer.id },
+            data: { pendingBalance: { increment: payment.amount } }
+          });
+        }
       }
 
       // 2. Revert Sale Status
       if (payment.sale) {
-        // If it was paid, it might become unpaid
         const allPayments = await tx.payment.findMany({
           where: { saleId: payment.saleId, NOT: { id: payment.id } }
         });
