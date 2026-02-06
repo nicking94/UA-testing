@@ -95,26 +95,20 @@ export class BackupService {
     return this.prisma.$transaction(
       async (tx) => {
         try {
+          console.log(`Starting import for user ${userId}. Keys present:`, Object.keys(data));
+
           // 1. Clear current user's data (reversing relationship order to avoid FK errors)
-          
-          // Dependencies of Sales
           await tx.dailyCashMovement.deleteMany({ where: { dailyCash: { userId } } });
           await tx.payment.deleteMany({ where: { sale: { userId } } });
           await tx.installment.deleteMany({ where: { sale: { userId } } });
           await tx.saleItem.deleteMany({ where: { sale: { userId } } });
           await tx.creditAlert.deleteMany({ where: { sale: { userId } } });
           await tx.saleEditHistory.deleteMany({ where: { sale: { userId } } });
-
-          // Dependencies of Budgets
           await tx.budgetItem.deleteMany({ where: { budget: { userId } } });
-
-          // Dependencies of Products
           await tx.productPrice.deleteMany({ where: { product: { userId } } });
           await tx.productCustomCategory.deleteMany({ where: { product: { userId } } });
           await tx.supplierProduct.deleteMany({ where: { product: { userId } } });
           await tx.productReturn.deleteMany({ where: { product: { userId } } });
-
-          // Models with direct userId
           await tx.sale.deleteMany({ where: { userId } });
           await tx.dailyCash.deleteMany({ where: { userId } });
           await tx.budget.deleteMany({ where: { userId } });
@@ -131,252 +125,286 @@ export class BackupService {
           await tx.note.deleteMany({ where: { userId } });
           await tx.notification.deleteMany({ where: { userId } });
 
-          // Helper to handle dates
           const ensureDate = (d: any) => (d ? new Date(d) : null);
+          const getList = (key: string) => {
+            if (Array.isArray(data[key])) return data[key];
+            if (Array.isArray(data[key + 's'])) return data[key + 's'];
+            if (key === 'dailyCash' && Array.isArray(data['dailyCashes'])) return data['dailyCashes'];
+            if (key === 'expenseCategory' && (Array.isArray(data['expenseCategories']) || Array.isArray(data['expensesCategories']))) 
+              return data['expenseCategories'] || data['expensesCategories'];
+            if (key === 'productReturn' && Array.isArray(data['returns'])) return data['returns'];
+            return [];
+          };
 
-          // 2. Import Data (Handling common plural/singular naming)
-          const getList = (key: string) => data[key] || data[key + 's'] || [];
+          const productMap = new Map<string | number, number>();
+          const supplierMap = new Map<string | number, number>();
+          const priceListMap = new Map<string | number, number>();
+          const saleMap = new Map<string | number, number>();
+          const paymentMap = new Map<string | number, number>();
+          const dailyCashMap = new Map<string | number, number>();
+          const budgetMap = new Map<string | number, string>();
+          const customerMap = new Map<string | number, string>();
 
           // Business Data
-          const businessData = getList('businessData');
-          if (businessData.length) {
-            await tx.businessData.createMany({ 
-              data: businessData.map(({ id, ...rest }: any) => ({ ...rest, userId })) 
-            });
+          for (const d of getList('businessData')) {
+            const { id, userId: _, ...rest } = d;
+            await tx.businessData.create({ data: { ...rest, userId } });
           }
 
           // User Preferences
-          const userPreferences = data.userPreferences || data.preferences || [];
-          if (Array.isArray(userPreferences) && userPreferences.length) {
-             // Preferences might be singular object in some exports or list in others
-             await tx.userPreferences.createMany({
-               data: userPreferences.map(({ id, ...rest }: any) => ({ ...rest, userId }))
-             });
-          } else if (typeof userPreferences === 'object' && !Array.isArray(userPreferences) && Object.keys(userPreferences).length) {
-             const { id, ...rest } = userPreferences as any;
-             await tx.userPreferences.create({ data: { ...rest, userId } });
+          const prefs = data.userPreferences || data.preferences || [];
+          const prefsList = Array.isArray(prefs) ? prefs : (Object.keys(prefs).length ? [prefs] : []);
+          for (const p of prefsList) {
+            const { id, userId: _, ...rest } = p;
+            await tx.userPreferences.create({ data: { ...rest, userId } });
           }
 
           // Customers
-          const customers = getList('customer');
-          if (customers.length) {
-            await tx.customer.createMany({ 
-              data: customers.map((c: any) => ({ ...c, userId })) 
-            });
+          for (const c of getList('customer')) {
+            const { id: oldId, userId: _, ...rest } = c;
+            // Ensure id is a string and preserved if possible (Customer uses String @id)
+            const newCustomer = await tx.customer.create({ data: { ...rest, id: String(oldId), userId } });
+            customerMap.set(oldId, newCustomer.id);
           }
 
           // Suppliers
-          const suppliers = getList('supplier');
-          if (suppliers.length) {
-            await tx.supplier.createMany({
-              data: suppliers.map(({ id, createdAt, updatedAt, ...rest }: any) => ({
-                ...rest,
-                userId,
-                createdAt: ensureDate(createdAt),
-                updatedAt: ensureDate(updatedAt),
-              })),
+          for (const s of getList('supplier')) {
+            const { id: oldId, userId: _, createdAt, updatedAt, ...rest } = s;
+            const newSupplier = await tx.supplier.create({ 
+              data: { ...rest, userId, createdAt: ensureDate(createdAt), updatedAt: ensureDate(updatedAt) } 
             });
+            supplierMap.set(oldId, newSupplier.id);
           }
 
           // Products
-          const products = getList('product');
-          if (products.length) {
-            await tx.product.createMany({
-              data: products.map(({ id, createdAt, updatedAt, ...rest }: any) => ({
-                ...rest,
-                userId,
-                createdAt: ensureDate(createdAt),
-                updatedAt: ensureDate(updatedAt),
-              })),
+          for (const p of getList('product')) {
+            const { id: oldId, userId: _, createdAt, updatedAt, ...rest } = p;
+            const newProduct = await tx.product.create({ 
+              data: { ...rest, userId, createdAt: ensureDate(createdAt), updatedAt: ensureDate(updatedAt) } 
             });
-          }
-
-          // Custom Categories
-          const customCategories = getList('customCategory');
-          if (customCategories.length) {
-            await tx.customCategory.createMany({
-              data: customCategories.map(({ id, ...rest }: any) => ({ ...rest, userId }))
-            });
+            productMap.set(oldId, newProduct.id);
           }
 
           // Price Lists
-          const priceLists = getList('priceList');
-          if (priceLists.length) {
-            await tx.priceList.createMany({ 
-              data: priceLists.map(({ id, ...rest }: any) => ({ ...rest, userId })) 
-            });
+          for (const pl of getList('priceList')) {
+            const { id: oldId, userId: _, ...rest } = pl;
+            const newPL = await tx.priceList.create({ data: { ...rest, userId } });
+            priceListMap.set(oldId, newPL.id);
           }
 
           // Product Prices
-          const productPrices = getList('productPrice');
-          if (productPrices.length) {
-            await tx.productPrice.createMany({ 
-              data: productPrices.map(({ id, ...rest }: any) => ({ ...rest })) 
-            });
+          for (const pp of getList('productPrice')) {
+            const { id, productId, priceListId, ...rest } = pp;
+            const newProductId = productMap.get(productId);
+            const newPriceListId = priceListMap.get(priceListId);
+            if (newProductId && newPriceListId) {
+              await tx.productPrice.create({ 
+                data: { ...rest, productId: newProductId, priceListId: newPriceListId } 
+              });
+            }
           }
 
-          // Expense Categories
-          const expenseCategories = getList('expenseCategory');
-          if (expenseCategories.length) {
-            await tx.expenseCategory.createMany({
-              data: expenseCategories.map(({ id, ...rest }: any) => ({ ...rest, userId })),
-            });
-          }
-
-          // Promotions
-          const promotions = getList('promotion');
-          if (promotions.length) {
-            await tx.promotion.createMany({
-              data: promotions.map(({ id, ...rest }: any) => ({ ...rest, userId }))
-            });
+          // Custom Categories
+          for (const cc of getList('customCategory')) {
+            const { id, userId: _, ...rest } = cc;
+            await tx.customCategory.create({ data: { ...rest, userId } });
           }
 
           // Sales & Related
-          const sales = getList('sale');
-          if (sales.length) {
-            for (const sale of sales) {
-              const { items, installments, id, createdAt, updatedAt, date, ...saleData } = sale;
-              await tx.sale.create({
-                data: {
-                  ...saleData,
-                  userId,
-                  date: ensureDate(date),
-                  createdAt: ensureDate(createdAt),
-                  updatedAt: ensureDate(updatedAt),
-                  items: items ? { create: items.map(({ id, ...it }: any) => it) } : undefined,
-                  installments: installments
-                    ? {
-                        create: installments.map((inst: any) => {
-                          const { id, createdAt, updatedAt, dueDate, paymentDate, ...instRest } = inst;
-                          return {
-                            ...instRest,
-                            dueDate: ensureDate(dueDate),
-                            paymentDate: ensureDate(paymentDate),
-                            createdAt: ensureDate(createdAt),
-                            updatedAt: ensureDate(updatedAt),
-                          };
-                        }),
-                      }
-                    : undefined,
-                },
-              });
+          for (const sale of getList('sale')) {
+            const { items, installments, id, createdAt, updatedAt, date, customerId, priceListId, ...saleData } = sale;
+            const newSale = await tx.sale.create({
+              data: {
+                ...saleData,
+                userId,
+                customerId: customerId ? (customerMap.get(customerId) || String(customerId)) : null,
+                priceListId: priceListId ? priceListMap.get(priceListId) : null,
+                date: ensureDate(date),
+                createdAt: ensureDate(createdAt),
+                updatedAt: ensureDate(updatedAt),
+              },
+            });
+            saleMap.set(id, newSale.id);
+
+            if (items) {
+              for (const item of items) {
+                const { id: itemId, productId, ...itemRest } = item;
+                await tx.saleItem.create({
+                  data: {
+                    ...itemRest,
+                    saleId: newSale.id,
+                    productId: productMap.get(productId) || productId, // Fallback to original if mapping fails
+                  }
+                });
+              }
+            }
+
+            if (installments) {
+              for (const inst of installments) {
+                const { id: instId, dueDate, paymentDate, createdAt, updatedAt, ...instRest } = inst;
+                await tx.installment.create({
+                  data: {
+                    ...instRest,
+                    creditSaleId: newSale.id,
+                    dueDate: ensureDate(dueDate),
+                    paymentDate: ensureDate(paymentDate),
+                    createdAt: ensureDate(createdAt),
+                    updatedAt: ensureDate(updatedAt),
+                  }
+                });
+              }
             }
           }
 
           // Payments
-          const payments = getList('payment');
-          if (payments.length) {
-            await tx.payment.createMany({
-              data: payments.map(({ id, date, createdAt, updatedAt, ...p }: any) => ({
-                ...p,
-                date: ensureDate(date),
-                createdAt: ensureDate(createdAt),
-                updatedAt: ensureDate(updatedAt),
-              })),
-            });
-          }
-
-          // Daily Cash & Movements
-          const dailyCashes = getList('dailyCash');
-          if (dailyCashes.length) {
-            for (const cash of dailyCashes) {
-              const { movements, id, date, closingDate, createdAt, updatedAt, ...cashData } = cash;
-              await tx.dailyCash.create({
+          for (const p of getList('payment')) {
+            const { id: oldId, saleId, customerId, date, createdAt, updatedAt, ...rest } = p;
+            const newSaleId = saleMap.get(saleId);
+            if (newSaleId) {
+              const newPayment = await tx.payment.create({
                 data: {
-                  ...cashData,
-                  userId,
+                  ...rest,
+                  saleId: newSaleId,
+                  customerId: customerId ? (customerMap.get(customerId) || String(customerId)) : null,
                   date: ensureDate(date),
-                  closingDate: ensureDate(closingDate),
                   createdAt: ensureDate(createdAt),
                   updatedAt: ensureDate(updatedAt),
-                  movements: movements
-                    ? {
-                        create: movements.map((m: any) => {
-                          const { id, date, createdAt, timestamp, ...mRest } = m;
-                          return {
-                            ...mRest,
-                            date: ensureDate(date),
-                            createdAt: ensureDate(createdAt),
-                            timestamp: ensureDate(timestamp),
-                          };
-                        }),
-                      }
-                    : undefined,
-                },
+                }
               });
+              paymentMap.set(oldId, newPayment.id);
             }
           }
 
-          // Expenses
-          const expenses = getList('expense');
-          if (expenses.length) {
-            await tx.expense.createMany({
-              data: expenses.map(({ id, date, createdAt, updatedAt, ...e }: any) => ({
-                ...e,
+          // Daily Cash & Movements
+          for (const cash of getList('dailyCash')) {
+            const { movements, id: oldId, date, closingDate, createdAt, updatedAt, ...cashData } = cash;
+            const newCash = await tx.dailyCash.create({
+              data: {
+                ...cashData,
+                userId,
+                date: ensureDate(date),
+                closingDate: ensureDate(closingDate),
+                createdAt: ensureDate(createdAt),
+                updatedAt: ensureDate(updatedAt),
+              },
+            });
+            dailyCashMap.set(oldId, newCash.id);
+
+            if (movements) {
+              for (const m of movements) {
+                const { id, date, createdAt, timestamp, paymentId, productId, customerId, ...mRest } = m;
+                await tx.dailyCashMovement.create({
+                  data: {
+                    ...mRest,
+                    dailyCashId: newCash.id,
+                    productId: productId ? productMap.get(productId) : null,
+                    customerId: customerId ? (customerMap.get(customerId) || String(customerId)) : null,
+                    paymentId: paymentId ? paymentMap.get(paymentId) : null,
+                    date: ensureDate(date),
+                    createdAt: ensureDate(createdAt),
+                    timestamp: ensureDate(timestamp),
+                  }
+                });
+              }
+            }
+          }
+
+          // Budgets
+          for (const budget of getList('budget')) {
+            const { items, id: oldId, date, customerId, ...budgetData } = budget;
+            const newBudget = await tx.budget.create({
+              data: {
+                ...budgetData,
+                userId,
+                id: oldId, // Budget uses UUID string, can usually preserve
+                customerId: customerId ? (customerMap.get(customerId) || String(customerId)) : null,
+                date: ensureDate(date),
+              },
+            });
+            budgetMap.set(oldId, newBudget.id);
+
+            if (items) {
+              for (const item of items) {
+                const { id, productId, ...itRest } = item;
+                await tx.budgetItem.create({
+                  data: {
+                    ...itRest,
+                    budgetId: newBudget.id,
+                    productId: productId ? productMap.get(productId) : null,
+                  }
+                });
+              }
+            }
+          }
+
+          // Other simple models
+          for (const ec of getList('expenseCategory')) {
+            const { id, userId: _, ...rest } = ec;
+            await tx.expenseCategory.create({ data: { ...rest, userId } });
+          }
+
+          for (const e of getList('expense')) {
+            const { id, date, createdAt, updatedAt, userId: _, ...rest } = e;
+            await tx.expense.create({
+              data: {
+                ...rest,
                 userId,
                 date: ensureDate(date),
                 createdAt: ensureDate(createdAt),
                 updatedAt: ensureDate(updatedAt),
-              })),
+              }
             });
           }
 
-          // Budgets
-          const budgets = getList('budget');
-          if (budgets.length) {
-            for (const budget of budgets) {
-              const { items, id, date, ...budgetData } = budget;
-              await tx.budget.create({
-                data: {
-                  ...budgetData,
-                  userId,
-                  date: ensureDate(date),
-                  items: items ? { create: items.map(({ id, ...it }: any) => it) } : undefined,
-                },
-              });
+          for (const promo of getList('promotion')) {
+            const { id, userId: _, ...rest } = promo;
+            await tx.promotion.create({ data: { ...rest, userId } });
+          }
+
+          for (const note of getList('note')) {
+            const { id, userId: _, customerId, budgetId, ...rest } = note;
+            await tx.note.create({
+              data: {
+                ...rest,
+                userId,
+                customerId: customerId ? (customerMap.get(customerId) || String(customerId)) : null,
+                budgetId: budgetId ? (budgetMap.get(budgetId) || String(budgetId)) : null,
+              }
+            });
+          }
+
+          for (const n of getList('notification')) {
+            const { id, userId: _, ...rest } = n;
+            await tx.notification.create({ data: { ...rest, userId } });
+          }
+
+          for (const sp of getList('supplierProduct')) {
+            const { id, supplierId, productId, ...rest } = sp;
+            const newSupId = supplierMap.get(supplierId);
+            const newProdId = productMap.get(productId);
+            if (newSupId && newProdId) {
+              await tx.supplierProduct.create({ data: { ...rest, supplierId: newSupId, productId: newProdId } });
             }
           }
 
-          // Notes
-          const notes = getList('note');
-          if (notes.length) {
-            await tx.note.createMany({
-              data: notes.map(({ id, ...rest }: any) => ({ ...rest, userId }))
-            });
-          }
-
-          // Notifications
-          const notifications = getList('notification');
-          if (notifications.length) {
-            await tx.notification.createMany({
-              data: notifications.map(({ id, ...rest }: any) => ({ ...rest, userId }))
-            });
-          }
-
-          // Supplier Products
-          const supplierProducts = getList('supplierProduct');
-          if (supplierProducts.length) {
-            await tx.supplierProduct.createMany({
-              data: supplierProducts.map(({ id, ...rest }: any) => rest)
-            });
-          }
-
-          // Product Returns
-          const returns = getList('return'); // Handle 'returns' key
-          if (returns.length) {
-            await tx.productReturn.createMany({
-              data: returns.map(({ id, ...rest }: any) => rest)
-            });
+          for (const ret of getList('productReturn')) {
+            const { id, productId, date, ...rest } = ret;
+            const newProdId = productMap.get(productId);
+            if (newProdId) {
+              await tx.productReturn.create({ 
+                data: { ...rest, productId: newProdId, date: ensureDate(date) } 
+              });
+            }
           }
 
           return { message: 'Importación completada exitosamente' };
         } catch (error) {
           console.error('Error durante la importación:', error);
-          throw new Error('Error al importar backup: ' + error.message);
+          throw new InternalServerErrorException('Error al importar backup: ' + error.message);
         }
       },
       {
-        timeout: 90000, // Increase timeout for large imports
+        timeout: 120000,
       },
     );
   }
