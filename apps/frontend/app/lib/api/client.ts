@@ -35,9 +35,10 @@ class ApiClient {
     if (this.token) {
       headers['Authorization'] = `Bearer ${this.token}`;
     } else if (!endpoint.startsWith('/auth/')) {
-        // En lugar de lanzar un error, devolvemos una promesa que resuelve a un valor "seguro"
-        // Esto evita que los componentes entren en el bloque catch y tiren errores en consola
-        return new Promise(() => {}) as Promise<T>;
+        // Lanzamos un error específico pero silencioso
+        const error = new Error('No token') as AuthError;
+        error.isAuthError = true;
+        throw error;
     }
     try {
       const response = await fetch(url, {
@@ -46,8 +47,10 @@ class ApiClient {
       });
       if (!response.ok) {
         if (response.status === 401) {
-            // Si es 401, simplemente no resolvemos para que el componente no haga nada
-            return new Promise(() => {}) as Promise<T>;
+            const error = new Error('Unauthorized') as AuthError;
+            error.isAuthError = true;
+            error.status = 401;
+            throw error;
         }
         const error = await response.json().catch(() => ({
           message: response.statusText,
@@ -64,16 +67,17 @@ class ApiClient {
       try {
         return JSON.parse(text);
       } catch {
-        // console.error('Error parsing JSON response:', text); // Silenciamos esto también
         return text as unknown as T;
       }
     } catch (err) {
       const error = err as AuthError;
-      if (error.isAuthError) {
-          return new Promise(() => {}) as Promise<T>;
+      // Si es un error de sesión, no lo mostramos en consola
+      if (error.isAuthError || error.message === 'No token' || error.status === 401) {
+          throw error;
       }
-      // Solo logueamos errores que NO sean de sesión
-      if (error.message !== 'Failed to fetch' && !endpoint.includes('auth')) {
+      
+      // Solo mostramos errores reales de la API
+      if (error.message !== 'Failed to fetch') {
           console.error(`API Error [${endpoint}]:`, error);
       }
       throw error;
