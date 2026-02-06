@@ -32,8 +32,12 @@ export default function AppLayout({
   const handleCloseSession = async () => {
     try {
       setIsLoggingOut(true);
-      authApi.logout();
-      router.replace("/login");
+      // Damos tiempo a que React desmonte los componentes antes de borrar el token
+      // Esto evita que los componentes intenten hacer peticiones sin token justo antes de morir
+      setTimeout(() => {
+        authApi.logout();
+        router.replace("/login");
+      }, 100);
     } catch (error) {
       console.error("Error al cerrar sesión:", error);
       setIsLoggingOut(false);
