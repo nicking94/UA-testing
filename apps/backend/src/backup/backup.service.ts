@@ -414,7 +414,7 @@ export class BackupService {
                 id: oldId, // Budget uses UUID string, can usually preserve
                 customerId: customerId && customerMap.has(customerId) ? customerMap.get(customerId) : null,
                 expirationDate: expirationDate ? ensureDate(expirationDate) : null,
-                deposit: deposit ? parseFloat(String(deposit)) : null,
+                deposit: deposit ? String(deposit) : null,
                 remaining: remaining ? parseFloat(String(remaining)) : null,
                 date: ensureDate(date),
                 createdAt: ensureDate(createdAt),
