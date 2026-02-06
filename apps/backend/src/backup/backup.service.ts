@@ -462,8 +462,9 @@ export class BackupService {
                 type: normalizeMovementType(type),
                 userId,
                 date: ensureDate(date),
-                createdAt: ensureDate(createdAt),
-                updatedAt: ensureDate(updatedAt),
+                // Expense model doesn't have createdAt/updatedAt
+                // createdAt: ensureDate(createdAt),
+                // updatedAt: ensureDate(updatedAt),
               }
             });
           }
@@ -493,12 +494,13 @@ export class BackupService {
           }
 
           for (const n of getList('notification')) {
-            const { id, userId: _, type, ...rest } = n;
+            const { id, userId: _, type, actualizationId, ...rest } = n;
             await tx.notification.create({ 
               data: { 
                 ...rest, 
                 type: normalizeNotificationType(type),
-                userId 
+                userId,
+                actualizationId: null, // Prevent INT4 overflow if backup has large ID 
               } 
             });
           }
