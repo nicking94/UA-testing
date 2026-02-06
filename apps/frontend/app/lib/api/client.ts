@@ -1,5 +1,5 @@
 // lib/api/client.ts
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+
 
 interface AuthError extends Error {
   isAuthError?: boolean;
@@ -129,4 +129,4 @@ class ApiClient {
     });
   }
 }
-export const apiClient = new ApiClient(API_URL);
+export const apiClient = new ApiClient();
