@@ -46,7 +46,16 @@ const LoginPage = () => {
             setIsOpenNotification(true);
             setTimeout(() => setIsOpenNotification(false), 2500);
           }
-          setShowTermsCheckbox(true);
+          
+          // Check for persisted terms acceptance
+          const savedTerms = localStorage.getItem("termsAccepted");
+          if (savedTerms === "true") {
+            setAcceptedTerms(true);
+            setShowTermsCheckbox(false);
+          } else {
+            setShowTermsCheckbox(true);
+          }
+          
           setIsInitialized(true);
         } catch (error) {
           console.error("Error en inicialización:", error);
@@ -73,6 +82,12 @@ const LoginPage = () => {
     setIsOpenNotification(true);
     try {
       await login(data.username, data.password);
+      
+      // Persist terms acceptance if checked
+      if (acceptedTerms) {
+        localStorage.setItem("termsAccepted", "true");
+      }
+
       setNotificationMessage("Inicio de sesión exitoso");
       setNotificationType("success");
       setTimeout(() => {
