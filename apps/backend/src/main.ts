@@ -5,24 +5,25 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   
-  // Lista de orígenes permitidos
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
   const origins = frontendUrl.split(',').map(url => url.trim());
   
-  // Añadimos versiones sin barra final por seguridad
+  // Limpiamos las URLs de barras finales
   const cleanOrigins = origins.map(url => url.endsWith('/') ? url.slice(0, -1) : url);
-  const allAllowedOrigins = [...new Set([...origins, ...cleanOrigins])];
 
   app.enableCors({
     origin: (origin, callback) => {
-      // Si no hay origen (como peticiones locales o de servidor a servidor) permitimos
+      // Permitir si no hay origen (como herramientas de test)
       if (!origin) return callback(null, true);
       
-      const isAllowed = allAllowedOrigins.some(allowed => origin.startsWith(allowed));
-      if (isAllowed) {
+      // Permitir si está en nuestra lista de FRONTEND_URL o es un subdominio de Vercel
+      const isAllowed = cleanOrigins.some(allowed => origin.startsWith(allowed));
+      const isVercel = origin.endsWith('.vercel.app');
+      
+      if (isAllowed || isVercel) {
         callback(null, true);
       } else {
-        console.error(`CORS blocked for origin: ${origin}`);
+        console.warn(`CORS blocked for: ${origin}`);
         callback(new Error('Not allowed by CORS'));
       }
     },
@@ -39,10 +40,7 @@ async function bootstrap() {
     }),
   );
 
-  // Railway asigna automáticamente un PORT, debemos usarlo o por defecto 3001
   const port = process.env.PORT || 3001;
-  // Escuchar en 0.0.0.0 es vital para Railway
   await app.listen(port, '0.0.0.0');
-  console.log(`🚀 Backend running on port ${port}`);
 }
 bootstrap();
