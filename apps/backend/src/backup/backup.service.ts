@@ -376,7 +376,7 @@ export class BackupService {
 
             if (movements) {
               for (const m of movements) {
-                const { id, date, createdAt, timestamp, paymentId, productId, customerId, rubro, unit, method, paymentMethod, type, items, combinedPaymentMethods, ...mRest } = m;
+                const { id, date, createdAt, timestamp, paymentId, productId, customerId, supplierId, rubro, unit, method, paymentMethod, type, items, combinedPaymentMethods, ...mRest } = m;
                 await tx.dailyCashMovement.create({
                   data: {
                     ...mRest,
@@ -388,6 +388,7 @@ export class BackupService {
                     dailyCashId: newCash.id,
                     productId: productId ? productMap.get(productId) : null,
                     customerId: customerId && customerMap.has(customerId) ? customerMap.get(customerId) : null,
+                    supplierId: supplierId && supplierMap.has(supplierId) ? supplierMap.get(supplierId) : null,
                     paymentId: paymentId ? paymentMap.get(paymentId) : null,
                     date: ensureDate(date),
                     createdAt: ensureDate(createdAt),
