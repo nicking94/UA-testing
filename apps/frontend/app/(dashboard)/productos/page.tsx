@@ -302,14 +302,6 @@ const useSortedProducts = (
 ) => {
   return useMemo(() => {
     let filtered = [...products];
-
-    // Server-side filtering handles rubro and search query now.
-    // We only keep client-side filtering for advanced filters that might not be fully supported by API yet
-    // or if we want to filter the already fetched subset.
-
-    // Note: We intentionally removed the rubro and searchQuery filters here
-    // because they are now handled by the API in fetchProducts.
-
     if (filters.length > 0) {
       filtered = filtered.filter((product) => {
         return filters.every((filter) => {
@@ -1247,7 +1239,6 @@ const ProductsPage = () => {
     closeNotification,
   } = useNotification();
 
-  // Estados para listas de precios
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
   const [selectedPriceListId, setSelectedPriceListId] = useState<number | null>(
     null,
